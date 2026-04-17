@@ -1,0 +1,26 @@
+{
+  "dataset_dir": "E:\\5g_handover\\phase_3\\test_dataset",
+  "model_dir": "E:\\5g_handover\\phase_2\\models\\final",
+  "baseline": {
+    "ttt_ms": 250,
+    "hys_db": 4.5,
+    "metrics": {
+      "HOs": 2597,
+      "RLFs": 1229,
+      "PingPongs": 73
+    }
+  },
+  "ppo_agent": {
+    "metrics": {
+      "HOs": 15589,
+      "RLFs": 1339,
+      "PingPongs": 2026
+    }
+  },
+  "improvements": {
+    "HO_reduction_percent": -500.26954177897574,
+    "RLF_reduction_percent": -8.950366151342555,
+    "PingPong_reduction_percent": -2675.3424657534247
+  },
+  "files_evaluated": 3
+}

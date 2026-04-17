@@ -1,0 +1,7 @@
+file,algorithm,HOs,RLFs,PingPongs
+s1_A_tick.csv,Baseline,708,162,34
+s1_A_tick.csv,PPO_Agent,3739,178,513
+s4_B_tick.csv,Baseline,1032,528,21
+s4_B_tick.csv,PPO_Agent,7146,586,898
+s7_A_tick.csv,Baseline,857,539,18
+s7_A_tick.csv,PPO_Agent,4704,575,615

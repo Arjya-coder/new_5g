@@ -1,0 +1,15 @@
+{
+  "CELL_CENTER": {
+    "avg_ttt": 135.078125,
+    "std_ttt": 61.46004919038363,
+    "min_ttt": 100,
+    "max_ttt": 320,
+    "avg_hys": 3.412109375,
+    "std_hys": 1.7250141087936381,
+    "min_hys": 1.0,
+    "max_hys": 6.0,
+    "avg_velocity": 2.0,
+    "avg_distance": 200.0,
+    "sample_count": 512
+  }
+}
