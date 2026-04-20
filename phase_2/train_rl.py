@@ -1,3 +1,4 @@
+# File: offline_ns3_env.py
 import os
 import glob
 import random
@@ -134,6 +135,58 @@ def _parse_seed_from_tick_filename(path: str) -> int | None:
     return int(m.group('seed'))
 
 
+def _parse_triplet_from_tick_filename(path: str) -> tuple[int, str, int] | None:
+    """Parse (scenario_id, pattern, seed) from a *_tick.csv filename.
+
+    Expected format: s<scenario>_p<pattern>_seed<seed>_tick.csv
+    """
+    base = os.path.basename(path)
+    m = _TICK_RE.match(base)
+    if not m:
+        return None
+    scenario_id = int(m.group('scenario'))
+    pattern = str(m.group('pattern')).upper()
+    seed = int(m.group('seed'))
+    return scenario_id, pattern, seed
+
+
+def _validate_split_full_grid(*, split_name: str, files: list[str], expected_seeds: list[int]) -> None:
+    """Fail fast if a split is missing scenarios/patterns for the expected seeds."""
+    expected_scenarios = list(range(1, 8))
+    expected_patterns = ["A", "B", "C"]
+    expected_pairs = {(s, p) for s in expected_scenarios for p in expected_patterns}
+
+    parsed = []
+    skipped = []
+    for f in files:
+        t = _parse_triplet_from_tick_filename(f)
+        if t is None:
+            skipped.append(f)
+            continue
+        parsed.append((f, t[0], t[1], t[2]))
+
+    # Group by seed so we can detect partial generation.
+    by_seed: dict[int, set[tuple[int, str]]] = {int(s): set() for s in expected_seeds}
+    for _, scenario_id, pattern, seed in parsed:
+        if seed in by_seed:
+            by_seed[int(seed)].add((int(scenario_id), str(pattern)))
+
+    problems: list[str] = []
+    for seed in expected_seeds:
+        pairs = by_seed.get(int(seed), set())
+        missing = sorted(expected_pairs - pairs)
+        if missing:
+            missing_str = ", ".join([f"s{s}_p{p}" for s, p in missing])
+            problems.append(f"seed {seed} missing {len(missing)}/21: {missing_str}")
+
+    if problems:
+        raise RuntimeError(
+            f"Dataset split '{split_name}' is incomplete (train/test must cover scenarios 1..7 and patterns A/B/C).\n"
+            + "\n".join(f"- {p}" for p in problems)
+            + ("\n\nAlso skipped files with unexpected names:\n" + "\n".join(skipped) if skipped else "")
+        )
+
+
 def split_tick_files_by_seed(tick_files, train_seeds, val_seeds, test_seeds):
     train, val, test, skipped = [], [], [], []
     train_seeds = set(int(s) for s in train_seeds)
@@ -157,7 +210,7 @@ def split_tick_files_by_seed(tick_files, train_seeds, val_seeds, test_seeds):
     return train, val, test, skipped
 
 if __name__ == "__main__":
-    # Fix 4: point to the new dataset with serving_d_m, serving_cqi, and true neighbors
+    # ✅ CRITICAL FIX: Point to dataset with improved scenarios
     dataset_dir = r"E:\5g_handover\dataset"
 
     model_dir = os.path.join(THIS_DIR, "models")
@@ -187,6 +240,11 @@ if __name__ == "__main__":
     if not train_files or not val_files or not test_files:
         raise RuntimeError("Split produced an empty set. Check filenames and seed lists.")
 
+    # Guardrail: ensure we don't accidentally train on only a subset of scenarios/patterns.
+    _validate_split_full_grid(split_name="train", files=train_files, expected_seeds=train_seeds)
+    _validate_split_full_grid(split_name="val", files=val_files, expected_seeds=val_seeds)
+    _validate_split_full_grid(split_name="test", files=test_files, expected_seeds=test_seeds)
+
     # --- Build environments ---
     rl_module = RLModule()
     control_interval_steps = 5  # hold TTT/HYS for 0.5s (5 ticks)
@@ -202,6 +260,14 @@ if __name__ == "__main__":
     agent = PPOAgent(state_dim=22, action_dim=15)
 
     # --- Train ---
+    print("\n" + "=" * 80)
+    print("STARTING PHASE 2 TRAINING WITH CRITICAL FIXES")
+    print("=" * 80)
+    print(f"✅ State dimension: 22 (includes current_ttt_norm + current_hys_norm)")
+    print(f"✅ Reward penalties strengthened (RLF -1.5, PP -1.0, HO -0.15)")
+    print(f"✅ Expected: Fixed parameter twitching, improved convergence")
+    print("=" * 80 + "\n")
+
     train_ppo(
         agent,
         rl_module,
@@ -237,3 +303,11 @@ if __name__ == "__main__":
         json.dump(val_metrics, f, indent=2)
     with open(os.path.join(log_dir, "eval_test_latest.json"), "w") as f:
         json.dump(test_metrics, f, indent=2)
+
+    print("\n" + "=" * 80)
+    print("TRAINING AND EVALUATION COMPLETE")
+    print("=" * 80)
+    print(f"Models saved to: {model_dir}")
+    print(f"Logs saved to: {log_dir}")
+    print("\nNext step: Compare training metrics with previous runs to verify improvements")
+    print("=" * 80 + "\n")
