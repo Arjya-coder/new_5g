@@ -22,6 +22,39 @@ from phase_2.algo_2 import Algorithm1 as Algo2Baseline
 from phase_2.algo_2 import PPOAgent, RLModule
 
 
+class _NumpyActorPolicy:
+    """Fast NumPy forward-pass for the saved PPO actor (Dense/ReLU MLP)."""
+
+    def __init__(self, w0: np.ndarray, b0: np.ndarray, w1: np.ndarray, b1: np.ndarray, w2: np.ndarray, b2: np.ndarray):
+        self.w0 = np.asarray(w0, dtype=np.float32)
+        self.b0 = np.asarray(b0, dtype=np.float32)
+        self.w1 = np.asarray(w1, dtype=np.float32)
+        self.b1 = np.asarray(b1, dtype=np.float32)
+        self.w2 = np.asarray(w2, dtype=np.float32)
+        self.b2 = np.asarray(b2, dtype=np.float32)
+
+    @classmethod
+    def from_keras_sequential(cls, model) -> "_NumpyActorPolicy":
+        layers = list(getattr(model, "layers", []))
+        if len(layers) != 3:
+            raise ValueError(f"Expected actor to have 3 Dense layers, got {len(layers)}")
+
+        w0, b0 = layers[0].get_weights()
+        w1, b1 = layers[1].get_weights()
+        w2, b2 = layers[2].get_weights()
+
+        return cls(w0, b0, w1, b1, w2, b2)
+
+    def argmax_action(self, state: np.ndarray) -> int:
+        x = np.asarray(state, dtype=np.float32).reshape(-1)
+        x = x @ self.w0 + self.b0
+        np.maximum(x, 0.0, out=x)
+        x = x @ self.w1 + self.b1
+        np.maximum(x, 0.0, out=x)
+        logits = x @ self.w2 + self.b2
+        return int(np.argmax(logits))
+
+
 def _collect_dataset_files(dataset_dir):
     """Collect supported Phase 3 files (*_tick.csv and *_test_noise.csv)."""
     tick_files = glob.glob(os.path.join(dataset_dir, "*_tick.csv"))
@@ -96,7 +129,9 @@ def _simulate_trajectory(ue_df,
                          baseline_ttt,
                          baseline_hys,
                          rl_agent=None,
-                         rl_module=None):
+                         rl_module=None,
+                         actor_policy: _NumpyActorPolicy | None = None,
+                         control_interval_steps: int = 1):
     """
     Simulate one UE trajectory.
 
@@ -122,6 +157,9 @@ def _simulate_trajectory(ue_df,
     # PPO parameters are carried forward step-by-step from selected actions.
     ttt_rule = 160
     hys_rule = 3.0
+
+    control_interval_steps = int(max(1, control_interval_steps))
+    steps_until_policy_update = 0
 
     for _, row in ue_df.iterrows():
         now_s = float(row["time_s"])
@@ -164,24 +202,32 @@ def _simulate_trajectory(ue_df,
         )
 
         if mode == "ppo":
-            recent_rlf_count = sum(recent_rlf_events)
-            recent_pp_count = sum(recent_pp_events)
-            state = rl_module.build_state_vector(
-                decision,
-                time_since_last_ho,
-                recent_rlf_count,
-                recent_pp_count,
-                rsrp_prev,
-            )
-            logits = rl_agent.actor(state.reshape(1, -1), training=False)
-            action = int(np.argmax(logits[0].numpy()))
-            delta_ttt, delta_hys = rl_agent.decode_action(action)
-            ttt_rule, hys_rule = rl_agent.compute_effective_parameters(
-                ttt_rule,
-                hys_rule,
-                delta_ttt,
-                delta_hys,
-            )
+            if actor_policy is None:
+                raise ValueError("actor_policy is required for mode='ppo'")
+
+            if steps_until_policy_update <= 0:
+                recent_rlf_count = sum(recent_rlf_events)
+                recent_pp_count = sum(recent_pp_events)
+                state = rl_module.build_state_vector(
+                    algo1_output=decision,
+                    ttt_eff=int(ttt_eff),
+                    hys_eff=float(hys_eff),
+                    time_since_last_ho=float(time_since_last_ho),
+                    recent_rlf_count=int(recent_rlf_count),
+                    recent_pp_count=int(recent_pp_count),
+                    rsrp_prev=rsrp_prev,
+                )
+                action = actor_policy.argmax_action(state)
+                delta_ttt, delta_hys = rl_agent.decode_action(action)
+                ttt_rule, hys_rule = rl_agent.compute_effective_parameters(
+                    ttt_rule,
+                    hys_rule,
+                    delta_ttt,
+                    delta_hys,
+                )
+                steps_until_policy_update = control_interval_steps
+
+            steps_until_policy_update = max(0, steps_until_policy_update - 1)
 
         rsrp_prev = float(decision.get("rsrp_serving_dbm", serving_rsrp))
 
@@ -288,7 +334,12 @@ def _plot_summary(results, output_png, baseline_ttt, baseline_hys):
     plt.close(fig)
 
 
-def run_comparisons(dataset_dir, model_dir, output_dir, baseline_ttt=250, baseline_hys=4.5):
+def run_comparisons(dataset_dir,
+                    model_dir,
+                    output_dir,
+                    baseline_ttt=250,
+                    baseline_hys=4.5,
+                    control_interval_steps: int = 1):
     csv_files = _collect_dataset_files(dataset_dir)
     if not csv_files:
         raise RuntimeError(f"No supported dataset files found in: {dataset_dir}")
@@ -303,9 +354,10 @@ def run_comparisons(dataset_dir, model_dir, output_dir, baseline_ttt=250, baseli
     print(f"Loaded {len(csv_files)} Phase 3 dataset files from: {dataset_dir}")
     print(f"Using trained model from: {model_dir}")
 
-    rl_agent = PPOAgent(state_dim=20, action_dim=15)
+    rl_agent = PPOAgent(state_dim=22, action_dim=15)
     rl_agent.load(model_dir)
     rl_module = RLModule()
+    actor_policy = _NumpyActorPolicy.from_keras_sequential(rl_agent.actor)
 
     summary = {
         "Baseline": {"HOs": 0, "RLFs": 0, "PingPongs": 0},
@@ -332,6 +384,7 @@ def run_comparisons(dataset_dir, model_dir, output_dir, baseline_ttt=250, baseli
                 mode="baseline",
                 baseline_ttt=baseline_ttt,
                 baseline_hys=baseline_hys,
+                control_interval_steps=control_interval_steps,
             )
 
             ppo_algo = Algo2Baseline()
@@ -343,6 +396,8 @@ def run_comparisons(dataset_dir, model_dir, output_dir, baseline_ttt=250, baseli
                 baseline_hys=baseline_hys,
                 rl_agent=rl_agent,
                 rl_module=rl_module,
+                actor_policy=actor_policy,
+                control_interval_steps=control_interval_steps,
             )
 
             for k in base_metrics:
@@ -438,6 +493,12 @@ def _build_arg_parser():
     parser.add_argument("--output-dir", default=default_output_dir, help="Directory to save Phase 3 outputs")
     parser.add_argument("--baseline-ttt", type=int, default=250, help="Baseline static TTT (ms)")
     parser.add_argument("--baseline-hys", type=float, default=4.5, help="Baseline static HYS (dB)")
+    parser.add_argument(
+        "--control-interval-steps",
+        type=int,
+        default=1,
+        help="Hold PPO-selected TTT/HYS for N ticks before next policy update (default: 1).",
+    )
     return parser
 
 
@@ -449,4 +510,5 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         baseline_ttt=args.baseline_ttt,
         baseline_hys=args.baseline_hys,
+        control_interval_steps=args.control_interval_steps,
     )

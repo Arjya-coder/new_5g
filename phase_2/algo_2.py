@@ -243,10 +243,10 @@ class RLModule:
         self.recent_pp_history = deque(maxlen=10)
         self.recent_ho_history = deque(maxlen=10)
 
-    def build_state_vector(self, algo1_output, time_since_last_ho=0.0, 
-                           recent_rlf_count=0, recent_pp_count=0, rsrp_prev=None):
+    def build_state_vector(self, algo1_output, ttt_eff: int, hys_eff: float,
+                           time_since_last_ho=0.0, recent_rlf_count=0, recent_pp_count=0, rsrp_prev=None):
         """
-        Build 20-dim state with RSRP trend.
+        Build 22-dim state with RSRP trend + current control parameters.
         
         ✅ IMPROVEMENT #1: Added RSRP trend (new dimension)
         
@@ -255,11 +255,12 @@ class RLModule:
         - Neighbors (3): margin1, margin2, margin3 (BEST 3 by RSRP)
         - Signal (3): signal_quality_onehot[3]
         - Time (1): time_since_ho
+        - Control (2): ttt_norm, hys_norm
         - Scenario (2): velocity, neighbor_count
         - History (2): recent_rlf_rate, recent_pp_rate
         - Trend (1): rsrp_trend
         
-        Total: 20
+        Total: 22
         """
         state = []
         
@@ -315,6 +316,13 @@ class RLModule:
         
         time_norm = np.clip(time_since_last_ho / 10.0, 0, 1)
         state.append(time_norm)
+
+        # Current control parameters (fix partial observability when actions are deltas).
+        ttt_norm = np.clip((float(ttt_eff) - 100.0) / (320.0 - 100.0), 0, 1)
+        state.append(ttt_norm)
+
+        hys_norm = np.clip((float(hys_eff) - 1.0) / (6.0 - 1.0), 0, 1)
+        state.append(hys_norm)
         
         velocity = algo1_output['velocity']
         velocity_norm = np.clip(velocity / 50.0, 0, 1)
@@ -338,7 +346,7 @@ class RLModule:
         state.append(rsrp_trend_norm)
         
         state = np.array(state, dtype=np.float32)
-        assert len(state) == 20, f"State dim should be 20, got {len(state)}"
+        assert len(state) == 22, f"State dim should be 22, got {len(state)}"
         assert np.all(state >= -1.0) and np.all(state <= 1.0), \
             f"State out of bounds: min={state.min()}, max={state.max()}"
         
@@ -384,8 +392,6 @@ class RLModule:
         r_ho_freq = -0.05 * recent_ho_count
         
         r = r_rlf + r_pp + r_sinr + r_ho + r_smooth + r_noop + r_ho_freq
-        
-        r = r + 0.1
         r = np.clip(r, -1.0, +1.0)
         
         return float(r)
@@ -398,18 +404,18 @@ class RLModule:
 
 
 # ============================================================================
-# PPO AGENT (UPDATED FOR 20-DIM STATE)
+# PPO AGENT (UPDATED FOR 22-DIM STATE)
 # ============================================================================
 
 class PPOAgent:
     """
     PPO Agent with finer action space.
     
-    ✅ State dimension: 20 (was 19, added RSRP trend)
+    ✅ State dimension: 22 (added RSRP trend + current TTT/HYS)
     ✅ Action dimension: 15 (5 TTT × 3 HYS)
     """
     
-    def __init__(self, state_dim=20, action_dim=15, learning_rate_actor=1e-3, 
+    def __init__(self, state_dim=22, action_dim=15, learning_rate_actor=1e-3, 
                  learning_rate_critic=3e-3):
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -596,6 +602,19 @@ class TrainingEnv:
         self.param_history = []
         self.in_handover = False
 
+    @staticmethod
+    def _scenario_rlf_threshold_dbm(scenario_id: int) -> float:
+        # Mirrors the per-scenario thresholds in dataset.cpp.
+        return {
+            1: -122.0,
+            2: -121.0,
+            3: -124.0,
+            4: -122.0,
+            5: -125.0,
+            6: -123.0,
+            7: -118.0,
+        }.get(int(scenario_id), -122.0)
+
     def step(self, ttt_eff, hys_eff):
         """Execute one step."""
         algo1_output = self.ns3_env.step(ttt_eff, hys_eff, self.algo1)
@@ -612,12 +631,18 @@ class TrainingEnv:
         distance = algo1_output['distance_serving']
         ho_event = algo1_output['ho_occurred']
         
-        if sinr_current < -20:
+        scenario_id = int(algo1_output.get('scenario_id', 1))
+        rlf_threshold = self._scenario_rlf_threshold_dbm(scenario_id)
+
+        if rsrp_current < rlf_threshold:
             self.rlf_counter += 1
         else:
             self.rlf_counter = 0
-        
+
+        # Edge-triggered like dataset.cpp (avoid counting the same low-RSRP streak every tick).
         rlf_event = (self.rlf_counter >= 2)
+        if rlf_event:
+            self.rlf_counter = 0
         self.recent_rlf_events.append(1 if rlf_event else 0)
         
         handover_occurred = False
@@ -647,8 +672,15 @@ class TrainingEnv:
         recent_pp_count = sum(self.recent_pp_events)
         recent_ho_count = sum(self.recent_ho_events)
         
-        state = self.rl_module.build_state_vector(algo1_output, self.time_since_last_ho, 
-                                                   recent_rlf_count, recent_pp_count, self.rsrp_prev)
+        state = self.rl_module.build_state_vector(
+            algo1_output,
+            ttt_eff,
+            hys_eff,
+            self.time_since_last_ho,
+            recent_rlf_count,
+            recent_pp_count,
+            self.rsrp_prev,
+        )
         
         self.sinr_prev = sinr_current
         self.rsrp_prev = rsrp_current
@@ -673,9 +705,82 @@ class TrainingEnv:
         })
         
         return state, rlf_event, ping_pong_event, sinr_delta, sinr_current, handover_occurred, recent_ho_count, done
+
+    def step_n(self, ttt_eff, hys_eff, delta_ttt_step, delta_hys_db, no_op, n_steps: int,
+               gamma: float = 0.99):
+        """Advance the environment by n_steps ticks holding (ttt_eff, hys_eff).
+
+        Returns:
+        - state_next
+        - reward (discounted sum over micro-steps)
+        - rlf_count, pp_count, ho_count (counts over micro-steps)
+        - done
+        """
+        n_steps = int(max(1, n_steps))
+
+        reward_accum = 0.0
+        discount = 1.0
+
+        rlf_count = 0
+        pp_count = 0
+        ho_count = 0
+        steps_executed = 0
+        state_next = None
+        done = False
+
+        for micro in range(n_steps):
+            state_next, rlf_event, ping_pong_event, sinr_delta, sinr_current, ho_occurred, recent_ho_count, done = \
+                self.step(ttt_eff, hys_eff)
+
+            steps_executed += 1
+
+            # Apply action-related penalties only on the first micro-step (control-rate fix).
+            if micro == 0:
+                dt_step = delta_ttt_step
+                dh_db = delta_hys_db
+                no_op_flag = bool(no_op)
+            else:
+                dt_step = 0
+                dh_db = 0.0
+                no_op_flag = False
+
+            r_tick = self.rl_module.compute_reward(
+                rlf_event,
+                ping_pong_event,
+                sinr_delta,
+                sinr_current,
+                ho_occurred,
+                dt_step,
+                dh_db,
+                recent_ho_count,
+                no_op_flag,
+            )
+
+            reward_accum += discount * float(r_tick)
+            discount *= float(gamma)
+
+            rlf_count += 1 if rlf_event else 0
+            pp_count += 1 if ping_pong_event else 0
+            ho_count += 1 if ho_occurred else 0
+
+            if done:
+                break
+
+        return (
+            state_next,
+            float(reward_accum),
+            int(rlf_count),
+            int(pp_count),
+            int(ho_count),
+            int(steps_executed),
+            bool(done),
+        )
     
     def reset(self):
         """Reset environment."""
+        # Fresh baseline per episode (avoid state leakage across traces).
+        self.algo1 = Algorithm1()
+
         self.time_since_last_ho = 0.0
         self.sinr_prev = None
         self.rsrp_prev = None
@@ -691,7 +796,10 @@ class TrainingEnv:
         self.in_handover = False
         
         algo1_output = self.ns3_env.reset(self.algo1)
-        state = self.rl_module.build_state_vector(algo1_output, 0.0, 0, 0, None)
+        # Must match OfflineNs3Env.reset default parameters.
+        ttt_eff = 160
+        hys_eff = 3.0
+        state = self.rl_module.build_state_vector(algo1_output, ttt_eff, hys_eff, 0.0, 0, 0, None)
         return state
 
 
@@ -700,7 +808,7 @@ class TrainingEnv:
 # ============================================================================
 
 def train_ppo(agent, rl_module, training_env, num_episodes=350, rollout_horizon=2048,
-              save_dir="models", log_dir="logs"):
+              save_dir="models", log_dir="logs", control_interval_steps: int = 5):
     """
     Production training loop - 350 episodes for full convergence.
     
@@ -716,12 +824,12 @@ def train_ppo(agent, rl_module, training_env, num_episodes=350, rollout_horizon=
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     print("=" * 80)
-    print("PPO TRAINING START - 350 EPISODES")
+    print(f"PPO TRAINING START - {num_episodes} EPISODES")
     print("=" * 80)
-    print(f"State dimension: 20")
+    print(f"State dimension: {agent.state_dim}")
     print(f"Action dimension: 15 (5 TTT × 3 HYS)")
     print(f"Rollout horizon: {rollout_horizon} steps (~{rollout_horizon*0.1}s per episode)")
-    print(f"Total training time: ~{350*rollout_horizon*0.0001:.1f} hours (est.)")
+    print(f"Total training time: ~{num_episodes*rollout_horizon*0.0001:.1f} hours (est.)")
     print("=" * 80)
     
     for episode in range(num_episodes):
@@ -739,42 +847,52 @@ def train_ppo(agent, rl_module, training_env, num_episodes=350, rollout_horizon=
         ttt_rule = 160
         hys_rule = 3.0
         
-        for step in range(rollout_horizon):
+        tick = 0
+        control_interval_steps = int(max(1, control_interval_steps))
+
+        while tick < rollout_horizon:
             action, log_prob, value = agent.select_action(state)
-            
+
             delta_ttt, delta_hys = agent.decode_action(action)
-            
             no_op = (delta_ttt == 0 and delta_hys == 0)
-            
+
             ttt_eff, hys_eff = agent.compute_effective_parameters(
                 ttt_rule, hys_rule, delta_ttt, delta_hys
             )
-            
-            state_next, rlf_event, ping_pong_event, sinr_delta, sinr_current, ho_occurred, recent_ho_count, done = \
-                training_env.step(ttt_eff, hys_eff)
-            
-            reward = rl_module.compute_reward(rlf_event, ping_pong_event, sinr_delta, sinr_current,
-                                             ho_occurred, delta_ttt, delta_hys, recent_ho_count, no_op)
-            
+
+            steps_to_run = min(control_interval_steps, rollout_horizon - tick)
+
+            state_next, reward, rlf_c, pp_c, ho_c, steps_executed, done = training_env.step_n(
+                ttt_eff,
+                hys_eff,
+                delta_ttt,
+                delta_hys,
+                no_op,
+                steps_to_run,
+                gamma=agent.gamma,
+            )
+
             trajectories.append({
                 's': state,
                 'a': action,
                 'r': reward,
                 'V': value,
-                'log_prob': log_prob
+                'log_prob': log_prob,
+                'n_steps': steps_executed,
             })
-            
+
             episode_reward += reward
-            episode_rlf += (1 if rlf_event else 0)
-            episode_pp += (1 if ping_pong_event else 0)
-            episode_ho += (1 if ho_occurred else 0)
-            episode_length += 1
-            
+            episode_rlf += int(rlf_c)
+            episode_pp += int(pp_c)
+            episode_ho += int(ho_c)
+            episode_length += int(steps_executed)
+
             ttt_rule = ttt_eff
             hys_rule = hys_eff
-            
+
             state = state_next
-            
+            tick += int(steps_executed)
+
             if done:
                 break
         
@@ -792,9 +910,13 @@ def train_ppo(agent, rl_module, training_env, num_episodes=350, rollout_horizon=
                 next_value = bootstrap_value
             else:
                 next_value = trajectories[i + 1]['V']
-            
-            delta = trajectories[i]['r'] + agent.gamma * next_value - trajectories[i]['V']
-            gae = delta + agent.gamma * agent.gae_lambda * gae
+
+            n = int(trajectories[i].get('n_steps', 1))
+            gamma_n = agent.gamma ** n
+            gae_discount = (agent.gamma * agent.gae_lambda) ** n
+
+            delta = trajectories[i]['r'] + gamma_n * next_value - trajectories[i]['V']
+            gae = delta + gae_discount * gae
             
             advantages.insert(0, gae)
             returns.insert(0, gae + trajectories[i]['V'])
@@ -841,7 +963,7 @@ def train_ppo(agent, rl_module, training_env, num_episodes=350, rollout_horizon=
         json.dump(training_env.param_history, f, indent=2)
     
     print("=" * 80)
-    print("TRAINING COMPLETE - 350 EPISODES")
+    print(f"TRAINING COMPLETE - {num_episodes} EPISODES")
     print(f"Final model: {save_dir}/final")
     print(f"Metrics: {log_dir}/metrics_{timestamp}.json")
     print(f"Parameter history: {log_dir}/param_history_{timestamp}.json")
@@ -854,7 +976,7 @@ def train_ppo(agent, rl_module, training_env, num_episodes=350, rollout_horizon=
 # EVALUATION
 # ============================================================================
 
-def evaluate_agent(agent, rl_module, training_env, num_episodes=10, greedy=True):
+def evaluate_agent(agent, rl_module, training_env, num_episodes=10, greedy=True, control_interval_steps: int = 5):
     """Evaluate trained agent."""
     all_metrics = []
     
@@ -873,6 +995,9 @@ def evaluate_agent(agent, rl_module, training_env, num_episodes=10, greedy=True)
         ttt_rule = 160
         hys_rule = 3.0
         
+        tick = 0
+        control_interval_steps = int(max(1, control_interval_steps))
+
         while True:
             state_input = np.array(state, dtype=np.float32).reshape(1, -1)
             logits = agent.actor(state_input, training=False)[0].numpy()
@@ -884,21 +1009,25 @@ def evaluate_agent(agent, rl_module, training_env, num_episodes=10, greedy=True)
                 action = np.random.choice(agent.action_dim, p=probs)
             
             delta_ttt, delta_hys = agent.decode_action(action)
-            ttt_eff, hys_eff = agent.compute_effective_parameters(
-                ttt_rule, hys_rule, delta_ttt, delta_hys
+            no_op = (delta_ttt == 0 and delta_hys == 0)
+            ttt_eff, hys_eff = agent.compute_effective_parameters(ttt_rule, hys_rule, delta_ttt, delta_hys)
+
+            state_next, reward, rlf_c, pp_c, ho_c, steps_executed, done = training_env.step_n(
+                ttt_eff,
+                hys_eff,
+                delta_ttt,
+                delta_hys,
+                no_op,
+                control_interval_steps,
+                gamma=agent.gamma,
             )
-            
-            state_next, rlf_event, pp_event, sinr_delta, sinr_current, ho_occurred, recent_ho_count, done = \
-                training_env.step(ttt_eff, hys_eff)
-            
-            reward = rl_module.compute_reward(rlf_event, pp_event, sinr_delta, sinr_current,
-                                             ho_occurred, delta_ttt, delta_hys, recent_ho_count, False)
-            
+
             total_reward += reward
-            rlf_count += (1 if rlf_event else 0)
-            pp_count += (1 if pp_event else 0)
-            ho_count += (1 if ho_occurred else 0)
-            
+            rlf_count += int(rlf_c)
+            pp_count += int(pp_c)
+            ho_count += int(ho_c)
+
+            tick += int(steps_executed)
             ttt_rule = ttt_eff
             hys_rule = hys_eff
             state = state_next
@@ -991,7 +1120,7 @@ if __name__ == "__main__":
     print("   • 4 improvements (RSRP trend, priority, HO freq, SINR abs)")
     print("   • All overengineering removed")
     print("\n✅ CONFIGURATION:")
-    print("   • State: 20-dim (8 serving + 3 margins + 3 signal + 6 context)")
+    print("   • State: 22-dim (adds current TTT/HYS)")
     print("   • Action: 15-dim (5 TTT levels × 3 HYS steps)")
     print("   • Episodes: 350 (extended from 300 for full convergence)")
     print("   • Horizon: 2048 steps per episode")

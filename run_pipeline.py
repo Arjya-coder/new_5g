@@ -2,26 +2,51 @@ import subprocess
 import pandas as pd
 import os
 import shutil
-from algo_1 import Algorithm1
+import json
+from typing import Tuple
 
-def deploy_and_run_ns3(scenario_id, pattern, seed, wsl_path="\\\\wsl$\\Ubuntu\\home\\arjyadeep\\ns-3-dev", duration=600):
+from phase_1.algo_1 import Algorithm1
+
+
+WORKSPACE_ROOT = os.path.dirname(os.path.abspath(__file__))
+DATASET_CPP_PATH = os.path.join(WORKSPACE_ROOT, "dataset.cpp")
+LOCAL_DATASET_DIR = os.path.join(WORKSPACE_ROOT, "dataset")
+
+
+def _unc_join_posix(unc_root: str, posix_path: str) -> str:
+    """Join a Windows UNC root with a POSIX-style relative path."""
+    parts = [p for p in posix_path.split('/') if p]
+    return os.path.join(unc_root, *parts)
+
+
+def deploy_and_run_ns3(
+    scenario_id: int,
+    pattern: str,
+    seed: int,
+    wsl_unc_ns3_root: str = "\\\\wsl$\\Ubuntu\\home\\arjyadeep\\ns-3-dev",
+    wsl_ns3_root: str = "~/ns-3-dev",
+    duration: int = 0,
+) -> Tuple[str, str, str]:
     """
     Deploys dataset.cpp to the ns-3 scratch folder and executes the simulation for a specific seed.
     """
-    dest_path = os.path.join(wsl_path, "scratch", "md_scenarios.cc")
+    dest_path = os.path.join(wsl_unc_ns3_root, "scratch", "md_scenarios.cc")
     
     # Ensure C++ file is present in ns3
-    try:
-        shutil.copy("dataset.cpp", dest_path)
-    except Exception as e:
-        pass # Assume it's already copied
-        
-    output_prefix = f"phase1_baseline/s{scenario_id}_{pattern}_{seed}"
+    shutil.copy(DATASET_CPP_PATH, dest_path)
+
+    run_prefix = f"s{scenario_id}_p{pattern}_seed{seed}"
+    output_prefix = f"phase1_baseline/{run_prefix}"
     
     # We instruct ns-3 to save it directly into the phase1_baseline folder inside ns-3-dev
-    bash_cmd = f"cd ~/ns-3-dev && mkdir -p phase1_baseline && ./ns3 run 'scratch/md_scenarios --scenarioId={scenario_id} --pattern={pattern} --seed={seed} --duration={duration} --outputPrefix={output_prefix}'"
+    bash_cmd = (
+        f"cd {wsl_ns3_root} && "
+        f"mkdir -p phase1_baseline && "
+        f"./ns3 run 'scratch/md_scenarios --scenarioId={scenario_id} --pattern={pattern} "
+        f"--seed={seed} --duration={duration} --outputPrefix={output_prefix}'"
+    )
     
-    print(f"Executing: s{scenario_id}_{pattern}_{seed}...")
+    print(f"Executing: {run_prefix}...")
     
     cmd_args = ["wsl", "-d", "Ubuntu", "-e", "bash", "-c", bash_cmd]
     result = subprocess.run(
@@ -31,14 +56,30 @@ def deploy_and_run_ns3(scenario_id, pattern, seed, wsl_path="\\\\wsl$\\Ubuntu\\h
     )
     
     if result.returncode != 0:
-        print(f"ns-3 command failed! Error: {result.stderr}")
+        raise RuntimeError(
+            "ns-3 command failed.\n"
+            f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+        )
     
     # Paths in WSL
-    wsl_tick_path = os.path.join(wsl_path, f"{output_prefix}_tick.csv")
-    wsl_event_path = os.path.join(wsl_path, f"{output_prefix}_events.csv")
-    wsl_summary_path = os.path.join(wsl_path, f"{output_prefix}_summary.json")
+    wsl_tick_path = _unc_join_posix(wsl_unc_ns3_root, f"{output_prefix}_tick.csv")
+    wsl_event_path = _unc_join_posix(wsl_unc_ns3_root, f"{output_prefix}_events.csv")
+    wsl_summary_path = _unc_join_posix(wsl_unc_ns3_root, f"{output_prefix}_summary.json")
     
     return wsl_tick_path, wsl_event_path, wsl_summary_path
+
+
+def _scenario_rlf_threshold_dbm(scenario_id: int) -> float:
+    # Mirrors the per-scenario thresholds in dataset.cpp.
+    return {
+        1: -122.0,
+        2: -121.0,
+        3: -124.0,
+        4: -122.0,
+        5: -125.0,
+        6: -123.0,
+        7: -118.0,
+    }.get(int(scenario_id), -122.0)
 
 def evaluate_algo1_from_csv(csv_path):
     """
@@ -63,6 +104,7 @@ def evaluate_algo1_from_csv(csv_path):
         sim_state = ue_sim_states[ue]
         
         rsrp_neighbors = []
+        sinr_neighbors = []
         neighbor_ids = []
         distance_neighbors = []
         
@@ -71,6 +113,7 @@ def evaluate_algo1_from_csv(csv_path):
             if pd.isna(n_id) or n_id == -1: continue
             neighbor_ids.append(int(n_id))
             rsrp_neighbors.append(row[f'n{n_i}_rsrp_dbm'])
+            sinr_neighbors.append(row[f'n{n_i}_sinr_db'])
             distance_neighbors.append(row[f'n{n_i}_d_m'])
             
         if sim_state["serving_cell"] is None:
@@ -78,16 +121,25 @@ def evaluate_algo1_from_csv(csv_path):
             
         serving_rsrp = -140.0
         serving_sinr = -20.0
+        distance_serving = 200.0
         
         if int(row['serving_cell']) == sim_state["serving_cell"]:
             serving_rsrp = row['serving_rsrp_dbm']
             serving_sinr = row['serving_sinr_db']
+            for i, nid in enumerate(neighbor_ids):
+                if nid == sim_state["serving_cell"]:
+                    distance_serving = float(distance_neighbors[i])
+                    break
+            else:
+                if distance_neighbors:
+                    distance_serving = float(min(distance_neighbors))
         else:
             found = False
             for i, nid in enumerate(neighbor_ids):
                 if nid == sim_state["serving_cell"]:
                     serving_rsrp = rsrp_neighbors[i]
-                    serving_sinr = max(-20.0, row['serving_sinr_db'] - 5.0) 
+                    serving_sinr = sinr_neighbors[i]
+                    distance_serving = float(distance_neighbors[i])
                     found = True
                     break
             if not found:
@@ -97,7 +149,7 @@ def evaluate_algo1_from_csv(csv_path):
             rsrp_serving=serving_rsrp,
             sinr_serving=serving_sinr,
             cqi_serving=10, 
-            distance_serving=100.0, 
+            distance_serving=distance_serving,
             rsrp_neighbors=rsrp_neighbors,
             neighbor_ids=neighbor_ids,
             distance_neighbors=distance_neighbors,
@@ -119,7 +171,8 @@ def evaluate_algo1_from_csv(csv_path):
             sim_state["last_ho_time"] = row['time_s']
             sim_state["serving_cell"] = target_id
             
-        if serving_rsrp < -122.0:
+        scenario_id = int(row.get('scenario_id', 1))
+        if serving_rsrp < _scenario_rlf_threshold_dbm(scenario_id):
             sim_state["low_rsrp_ticks"] += 1
         else:
             sim_state["low_rsrp_ticks"] = 0
@@ -132,13 +185,15 @@ def evaluate_algo1_from_csv(csv_path):
 
 def run_phase1_validation():
     # Setup local organized directory
-    local_baseline_dir = r"E:\5g_handover\dataset_phase1"
+    local_baseline_dir = LOCAL_DATASET_DIR
     if not os.path.exists(local_baseline_dir):
         os.makedirs(local_baseline_dir)
         
     scenarios = range(1, 8) # 1 through 7
-    patterns = ['A', 'B']
+    patterns = ['A', 'B', 'C']
     seeds = range(1, 6) # 1 through 5
+
+    evaluate_algo1 = False  # Dataset generation is the priority; enable if you want the offline Algo1 metrics.
     
     total_runs = len(scenarios) * len(patterns) * len(seeds)
     current_run = 0
@@ -156,11 +211,13 @@ def run_phase1_validation():
                 try:
                     # Execute in WSL
                     wsl_tick, wsl_event, wsl_summary = deploy_and_run_ns3(scenario_id, pattern, seed)
+
+                    run_prefix = f"s{scenario_id}_p{pattern}_seed{seed}"
                     
                     # Store locally in workspace
-                    local_tick = os.path.join(local_baseline_dir, f"s{scenario_id}_{pattern}_{seed}_tick.csv")
-                    local_event = os.path.join(local_baseline_dir, f"s{scenario_id}_{pattern}_{seed}_events.csv")
-                    local_summary = os.path.join(local_baseline_dir, f"s{scenario_id}_{pattern}_{seed}_summary.json")
+                    local_tick = os.path.join(local_baseline_dir, f"{run_prefix}_tick.csv")
+                    local_event = os.path.join(local_baseline_dir, f"{run_prefix}_events.csv")
+                    local_summary = os.path.join(local_baseline_dir, f"{run_prefix}_summary.json")
                     
                     # Copy from \\wsl$\... to e:\5g_handover\phase1_baseline\
                     if os.path.exists(wsl_tick):
@@ -170,22 +227,35 @@ def run_phase1_validation():
                     else:
                         print("Error: WSL files were not generated.")
                         continue
-                    
-                    # Evaluate on Algo1 natively
-                    algo1_metrics = evaluate_algo1_from_csv(local_tick)
-                    
-                    print(f"  > Handovers: {algo1_metrics['handovers']}")
-                    print(f"  > RLFs:      {algo1_metrics['rlf_events']}")
-                    print(f"  > PingPongs: {algo1_metrics['ping_pongs']}")
-                    
-                    global_results.append({
+
+                    # Always record the ns-3 generator summary (fast).
+                    with open(local_summary, 'r', encoding='utf-8') as f:
+                        summary = json.load(f)
+
+                    row_out = {
                         "Scenario": scenario_id,
                         "Pattern": pattern,
                         "Seed": seed,
-                        "Handovers": algo1_metrics['handovers'],
-                        "RLF": algo1_metrics['rlf_events'],
-                        "PingPongs": algo1_metrics['ping_pongs']
-                    })
+                        "Ns3_TotalHandovers": summary.get("total_handovers"),
+                        "Ns3_TotalRlf": summary.get("total_rlf"),
+                        "Ns3_TotalPingPong": summary.get("total_ping_pong"),
+                        "Ns3_HandoverPerMin": summary.get("handover_per_min"),
+                        "DurationS": summary.get("duration_s"),
+                        "UeCount": summary.get("ue_count"),
+                    }
+
+                    if evaluate_algo1:
+                        algo1_metrics = evaluate_algo1_from_csv(local_tick)
+                        print(f"  > Algo1 Handovers: {algo1_metrics['handovers']}")
+                        print(f"  > Algo1 RLFs:      {algo1_metrics['rlf_events']}")
+                        print(f"  > Algo1 PingPongs: {algo1_metrics['ping_pongs']}")
+                        row_out.update({
+                            "Algo1_Handovers": algo1_metrics['handovers'],
+                            "Algo1_RLF": algo1_metrics['rlf_events'],
+                            "Algo1_PingPongs": algo1_metrics['ping_pongs'],
+                        })
+
+                    global_results.append(row_out)
                     
                 except Exception as e:
                     print(f"Error executing S{scenario_id}_{pattern}_{seed}: {e}")
@@ -194,7 +264,7 @@ def run_phase1_validation():
     results_df = pd.DataFrame(global_results)
     results_df.to_csv(os.path.join(local_baseline_dir, "algo1_validation_results.csv"), index=False)
     print("\nPhase 1 Validation Full Generation Complete!")
-    print(f"All 210 files correctly stored in `{local_baseline_dir}/` alongside `algo1_validation_results.csv`!")
+    print(f"All datasets stored under `{local_baseline_dir}` alongside `algo1_validation_results.csv`!")
 
 if __name__ == "__main__":
     run_phase1_validation()

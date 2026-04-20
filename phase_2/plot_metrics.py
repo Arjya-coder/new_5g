@@ -1,6 +1,8 @@
 import os
 import json
 import glob
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -51,6 +53,38 @@ def plot_metrics(log_dir="logs", save_dir="plots"):
     plt.title("Mitigation Tradeoff: RLF vs Ping-Pongs")
     plt.savefig(os.path.join(save_dir, 'tradeoff_curve.png'))
     plt.close()
+
+    # 2b. Handover Count Curve
+    if 'ho_count' in df.columns:
+        plt.figure(figsize=(10, 5))
+        plt.plot(df['episode'], df['ho_count'], label="Handovers / Episode", color='tab:green', alpha=0.5)
+        plt.plot(df['episode'], df['ho_count'].rolling(window=20).mean(), label="HO Moving Avg (20)", color='k')
+        plt.title("Handover Count Over Training")
+        plt.xlabel("Episode")
+        plt.ylabel("Handovers")
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, 'handover_curve.png'))
+        plt.close()
+
+    # 2c. Parameter Evolution (TTT/HYS)
+    if 'ttt_final' in df.columns and 'hys_final' in df.columns:
+        fig, ax1 = plt.subplots(figsize=(10, 5))
+        ax1.set_xlabel('Episode')
+        ax1.set_ylabel('TTT (ms)', color='tab:blue')
+        ax1.plot(df['episode'], df['ttt_final'], color='tab:blue', alpha=0.6, label='TTT_final')
+        ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+        ax2 = ax1.twinx()
+        ax2.set_ylabel('HYS (dB)', color='tab:red')
+        ax2.plot(df['episode'], df['hys_final'], color='tab:red', alpha=0.6, label='HYS_final')
+        ax2.tick_params(axis='y', labelcolor='tab:red')
+
+        plt.title('Control Parameter Evolution')
+        fig.tight_layout()
+        plt.savefig(os.path.join(save_dir, 'parameter_evolution.png'))
+        plt.close()
     
     # 3. Bar Chart of Parameter Distribution from analysis
     analysis_files = glob.glob(os.path.join(log_dir, "param_analysis.json"))

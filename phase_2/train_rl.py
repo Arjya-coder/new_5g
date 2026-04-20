@@ -1,15 +1,20 @@
 import os
 import glob
 import random
+import re
+import json
 import pandas as pd
-from algo_2 import Algorithm1, RLModule, PPOAgent, TrainingEnv, train_ppo, analyze_parameter_patterns
+from algo_2 import Algorithm1, RLModule, PPOAgent, TrainingEnv, train_ppo, analyze_parameter_patterns, evaluate_agent
+
+
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class OfflineNs3Env:
     """
     Offline wrapper simulating the ns-3 C++ sandbox using pre-generated datasets.
     """
-    def __init__(self, dataset_dir):
-        self.csv_files = glob.glob(os.path.join(dataset_dir, "*_tick.csv"))
+    def __init__(self, dataset_dir, csv_files=None):
+        self.csv_files = list(csv_files) if csv_files is not None else glob.glob(os.path.join(dataset_dir, "*_tick.csv"))
         if not self.csv_files:
             raise RuntimeError(f"No *_tick.csv files found in {dataset_dir}")
         self.current_df = None
@@ -22,9 +27,15 @@ class OfflineNs3Env:
         ues = self.current_df['ue_id'].unique()
         self.current_ue = random.choice(ues)
         self.current_df = self.current_df[self.current_df['ue_id'] == self.current_ue].reset_index(drop=True)
-        self.row_idx = 0
-        
-        return self._process_current_row(algo1, 160, 3.0)
+        # Start from a random point in the trace to avoid always training on the same prefix.
+        min_remaining = 50
+        max_start = max(0, len(self.current_df) - min_remaining)
+        self.row_idx = random.randint(0, max_start) if max_start > 0 else 0
+
+        out = self._process_current_row(algo1, 160, 3.0)
+        # Ensure the first observation isn't repeated on the first step().
+        self.row_idx = min(self.row_idx + 1, len(self.current_df) - 1)
+        return out
         
     def step(self, ttt_eff, hys_eff, algo1):
         if self.is_done():
@@ -41,6 +52,7 @@ class OfflineNs3Env:
         row = self.current_df.iloc[self.row_idx]
         
         rsrp_neighbors = []
+        sinr_neighbors = []
         neighbor_ids = []
         distance_neighbors = []
         
@@ -49,6 +61,7 @@ class OfflineNs3Env:
             if pd.isna(n_id) or n_id == -1: continue
             neighbor_ids.append(int(n_id))
             rsrp_neighbors.append(float(row[f'n{n_i}_rsrp_dbm']))
+            sinr_neighbors.append(float(row[f'n{n_i}_sinr_db']))
             distance_neighbors.append(float(row[f'n{n_i}_d_m']))
             
         if algo1.serving_cell_id == 0:
@@ -56,8 +69,16 @@ class OfflineNs3Env:
             
         serving_rsrp = -140.0
         serving_sinr = -20.0
+        distance_serving = 200.0
+
+        def _approx_cqi_from_sinr(sinr_db: float) -> int:
+            # Rough mapping: -20 dB -> 0, +10 dB -> 15.
+            cqi = int(round((sinr_db + 20.0) / 30.0 * 15.0))
+            return max(0, min(15, cqi))
         
-        if int(row['serving_cell']) == algo1.serving_cell_id:
+        baseline_match = int(row['serving_cell']) == algo1.serving_cell_id
+
+        if baseline_match:
             serving_rsrp = float(row['serving_rsrp_dbm'])
             serving_sinr = float(row['serving_sinr_db'])
         else:
@@ -65,21 +86,30 @@ class OfflineNs3Env:
             for i, nid in enumerate(neighbor_ids):
                 if nid == algo1.serving_cell_id:
                     serving_rsrp = rsrp_neighbors[i]
-                    # Simulate relative SINR degradation when disconnected from primary physics
-                    serving_sinr = max(-20.0, float(row['serving_sinr_db']) - 5.0) 
+                    # Use true neighbor SINR (no clamp), aligned with the neighbor lists.
+                    serving_sinr = float(sinr_neighbors[i])
+                    distance_serving = float(distance_neighbors[i])
                     found = True
                     break
             if not found:
-                serving_rsrp, serving_sinr = -140.0, -20.0
-        
-        # Determine serving distance reliably
-        distance_serving = float(row.get('serving_d_m', 200.0))
+                serving_rsrp, serving_sinr = -140.0, -30.0   # deep fade, not clamped
+
+        # Distance/CQI must be cell-consistent too: only use serving_* if baseline match.
+        if baseline_match:
+            if 'serving_d_m' in row and not pd.isna(row['serving_d_m']):
+                distance_serving = float(row['serving_d_m'])
+            if 'serving_cqi' in row and not pd.isna(row.get('serving_cqi')):
+                cqi_serving = int(row['serving_cqi'])
+            else:
+                cqi_serving = _approx_cqi_from_sinr(serving_sinr)
+        else:
+            cqi_serving = _approx_cqi_from_sinr(serving_sinr)
                 
         decision = algo1.step(
             rsrp_serving=serving_rsrp,
             sinr_serving=serving_sinr,
-            cqi_serving=10, 
-            distance_serving=distance_serving, 
+            cqi_serving=cqi_serving,
+            distance_serving=distance_serving,
             rsrp_neighbors=rsrp_neighbors,
             neighbor_ids=neighbor_ids,
             distance_neighbors=distance_neighbors,
@@ -88,20 +118,122 @@ class OfflineNs3Env:
             TTT_eff=ttt_eff,
             HYS_eff=hys_eff
         )
+        # Provide scenario_id for per-scenario RLF thresholds in the RL env.
+        decision['scenario_id'] = int(row.get('scenario_id', 1))
         return decision
 
+
+_TICK_RE = re.compile(r"^s(?P<scenario>\d+)_p(?P<pattern>[A-C])_seed(?P<seed>\d+)_tick\.csv$", re.IGNORECASE)
+
+
+def _parse_seed_from_tick_filename(path: str) -> int | None:
+    base = os.path.basename(path)
+    m = _TICK_RE.match(base)
+    if not m:
+        return None
+    return int(m.group('seed'))
+
+
+def split_tick_files_by_seed(tick_files, train_seeds, val_seeds, test_seeds):
+    train, val, test, skipped = [], [], [], []
+    train_seeds = set(int(s) for s in train_seeds)
+    val_seeds = set(int(s) for s in val_seeds)
+    test_seeds = set(int(s) for s in test_seeds)
+
+    for f in tick_files:
+        seed = _parse_seed_from_tick_filename(f)
+        if seed is None:
+            skipped.append(f)
+            continue
+        if seed in train_seeds:
+            train.append(f)
+        elif seed in val_seeds:
+            val.append(f)
+        elif seed in test_seeds:
+            test.append(f)
+        else:
+            skipped.append(f)
+
+    return train, val, test, skipped
+
 if __name__ == "__main__":
-    dataset_dir = r"E:\5g_handover\dataset_phase1"
-    ns3_env = OfflineNs3Env(dataset_dir)
-    algo1 = Algorithm1()
+    # Fix 4: point to the new dataset with serving_d_m, serving_cqi, and true neighbors
+    dataset_dir = r"E:\5g_handover\dataset"
+
+    model_dir = os.path.join(THIS_DIR, "models")
+    log_dir = os.path.join(THIS_DIR, "logs")
+    plot_dir = os.path.join(THIS_DIR, "plots")
+
+    # --- Train/Val/Test split (by seed parsed from filenames) ---
+    # With seeds 1..5 available, a simple leakage-safe split is:
+    # - train: 1,2,3  |  val: 4  |  test: 5
+    train_seeds = [1, 2, 3]
+    val_seeds = [4]
+    test_seeds = [5]
+
+    all_tick = glob.glob(os.path.join(dataset_dir, "*_tick.csv"))
+    train_files, val_files, test_files, skipped = split_tick_files_by_seed(
+        all_tick, train_seeds=train_seeds, val_seeds=val_seeds, test_seeds=test_seeds
+    )
+
+    if skipped:
+        print(f"Warning: {len(skipped)} tick files skipped (unexpected name).")
+
+    print("Dataset split:")
+    print(f"  Train files: {len(train_files)} (seeds {train_seeds})")
+    print(f"  Val files:   {len(val_files)} (seeds {val_seeds})")
+    print(f"  Test files:  {len(test_files)} (seeds {test_seeds})")
+
+    if not train_files or not val_files or not test_files:
+        raise RuntimeError("Split produced an empty set. Check filenames and seed lists.")
+
+    # --- Build environments ---
     rl_module = RLModule()
-    
-    training_env = TrainingEnv(ns3_env, algo1, rl_module)
-    agent = PPOAgent(state_dim=20, action_dim=15)
-    
-    train_ppo(agent, rl_module, training_env, num_episodes=350, rollout_horizon=512, save_dir="models", log_dir="logs")
-    
-    # After training, parse the params
-    import glob
-    latest_params = max(glob.glob('logs/param_history_*.json'), key=os.path.getctime)
-    analyze_parameter_patterns(latest_params, 'logs/param_analysis.json')
+    control_interval_steps = 5  # hold TTT/HYS for 0.5s (5 ticks)
+
+    ns3_env_train = OfflineNs3Env(dataset_dir, csv_files=train_files)
+    ns3_env_val = OfflineNs3Env(dataset_dir, csv_files=val_files)
+    ns3_env_test = OfflineNs3Env(dataset_dir, csv_files=test_files)
+
+    train_env = TrainingEnv(ns3_env_train, Algorithm1(), rl_module)
+    val_env = TrainingEnv(ns3_env_val, Algorithm1(), rl_module)
+    test_env = TrainingEnv(ns3_env_test, Algorithm1(), rl_module)
+
+    agent = PPOAgent(state_dim=22, action_dim=15)
+
+    # --- Train ---
+    train_ppo(
+        agent,
+        rl_module,
+        train_env,
+        num_episodes=350,
+        rollout_horizon=512,
+        save_dir=model_dir,
+        log_dir=log_dir,
+        control_interval_steps=control_interval_steps,
+    )
+
+    # --- Post-training analysis + plots ---
+    latest_params = max(glob.glob(os.path.join(log_dir, 'param_history_*.json')), key=os.path.getctime)
+    analyze_parameter_patterns(latest_params, os.path.join(log_dir, 'param_analysis.json'))
+
+    try:
+        from plot_metrics import plot_metrics
+        plot_metrics(log_dir=log_dir, save_dir=plot_dir)
+    except Exception as e:
+        print(f"Plotting skipped (matplotlib missing or error): {e}")
+
+    # --- Evaluate on val/test (unseen seeds) ---
+    print("\nEvaluating on validation split (greedy policy)...")
+    val_metrics = evaluate_agent(agent, rl_module, val_env, num_episodes=10, greedy=True,
+                                 control_interval_steps=control_interval_steps)
+
+    print("Evaluating on test split (greedy policy)...")
+    test_metrics = evaluate_agent(agent, rl_module, test_env, num_episodes=10, greedy=True,
+                                  control_interval_steps=control_interval_steps)
+
+    os.makedirs(log_dir, exist_ok=True)
+    with open(os.path.join(log_dir, "eval_val_latest.json"), "w") as f:
+        json.dump(val_metrics, f, indent=2)
+    with open(os.path.join(log_dir, "eval_test_latest.json"), "w") as f:
+        json.dump(test_metrics, f, indent=2)

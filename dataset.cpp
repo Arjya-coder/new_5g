@@ -9,7 +9,7 @@
  * - CSV tick/event logs and a JSON summary
  *
  * Example:
- * ./ns3 run "Planning/ns3_data/ns3_md_scenarios --scenarioId=1 --pattern=A --ueCount=20 --duration=600 --seed=7 --tttMs=160 --hysDb=3 --outputPrefix=results/ns3_md/s1_a_seed7"
+ * ./ns3 run "Planning/ns3_data/ns3_md_scenarios --scenarioId=1 --pattern=A --ueCount=20 --duration=600 --seed=7 --tttMs=160 --hysDb=3 --outputPrefix=dataset/s1_pA_seed7"
  */
 
 #include "ns3/buildings-module.h"
@@ -45,6 +45,12 @@ constexpr uint32_t kTopNeighborsToLog = 6;
 constexpr double kPingPongWindowS = 5.0;
 constexpr double kNoiseFloorDbm = -104.0;
 
+#ifdef _WIN32
+constexpr const char* kDefaultOutputPrefix = R"(E:\5g_handover\dataset\run)";
+#else
+constexpr const char* kDefaultOutputPrefix = "results/ns3_md/run";
+#endif
+
 struct CliOptions
 {
   uint32_t scenarioId = 1;
@@ -54,7 +60,7 @@ struct CliOptions
   uint32_t seed = 1;
   uint32_t tttMs = 160;
   double hysDb = 3.0;
-  std::string outputPrefix = "results/ns3_md/run";
+  std::string outputPrefix = kDefaultOutputPrefix;
 };
 
 struct GnbSpec
@@ -1875,6 +1881,23 @@ private:
   {
     double margin = (bestNeighborCell != 0) ? (bestNeighborRsrp - serving.rsrpDbm) : -999.0;
 
+    // Fix 3: compute CQI from serving SINR using 3GPP CQI table
+    int servingCqi = 1;
+    if      (serving.sinrDb >= 22.7) servingCqi = 15;
+    else if (serving.sinrDb >= 20.7) servingCqi = 14;
+    else if (serving.sinrDb >= 18.7) servingCqi = 13;
+    else if (serving.sinrDb >= 17.4) servingCqi = 12;
+    else if (serving.sinrDb >= 14.1) servingCqi = 11;
+    else if (serving.sinrDb >= 11.7) servingCqi = 10;
+    else if (serving.sinrDb >=  9.0) servingCqi =  9;
+    else if (serving.sinrDb >=  7.0) servingCqi =  8;
+    else if (serving.sinrDb >=  5.1) servingCqi =  7;
+    else if (serving.sinrDb >=  3.0) servingCqi =  6;
+    else if (serving.sinrDb >=  1.0) servingCqi =  5;
+    else if (serving.sinrDb >= -1.0) servingCqi =  4;
+    else if (serving.sinrDb >= -4.7) servingCqi =  3;
+    else if (serving.sinrDb >= -6.7) servingCqi =  2;
+
     m_tickCsv << std::fixed << std::setprecision(3)
               << now << ","
               << m_scenario.id << ","
@@ -1886,6 +1909,8 @@ private:
               << ue.servingCell << ","
               << serving.rsrpDbm << ","
               << serving.sinrDb << ","
+              << serving.distanceM << ","   // Fix 1: serving_d_m
+              << servingCqi << ","           // Fix 3: serving_cqi
               << bestNeighborCell << ","
               << bestNeighborRsrp << ","
               << margin << ","
@@ -1896,20 +1921,25 @@ private:
               << static_cast<int>(decision.pingPongEvent) << ","
               << serving.losProbability;
 
-    for (uint32_t i = 0; i < kTopNeighborsToLog; ++i)
+    // Fix 2: exclude serving cell from neighbor columns so n1..n6 are true neighbors
+    uint32_t written = 0;
+    for (size_t idx = 0; idx < meas.size() && written < kTopNeighborsToLog; ++idx)
     {
-      if (i < meas.size())
+      if (meas[idx].cellId == ue.servingCell)
       {
-        const auto& n = meas[i];
-        m_tickCsv << "," << n.cellId
-                  << "," << n.rsrpDbm
-                  << "," << n.sinrDb
-                  << "," << n.distanceM;
+        continue; // skip — already logged as serving
       }
-      else
-      {
-        m_tickCsv << ",-1,-140,-20,0";
-      }
+      const auto& n = meas[idx];
+      m_tickCsv << "," << n.cellId
+                << "," << n.rsrpDbm
+                << "," << n.sinrDb
+                << "," << n.distanceM;
+      ++written;
+    }
+    // Pad remaining neighbor slots with sentinel values
+    for (; written < kTopNeighborsToLog; ++written)
+    {
+      m_tickCsv << ",-1,-140.0,-20.0,0.0";
     }
 
     m_tickCsv << "\n";
@@ -1951,7 +1981,11 @@ private:
     NS_ABORT_MSG_IF(!m_tickCsv.is_open(), "Failed to open tick CSV: " << tickPath);
     NS_ABORT_MSG_IF(!m_eventCsv.is_open(), "Failed to open event CSV: " << eventPath);
 
-    m_tickCsv << "time_s,scenario_id,pattern,ue_id,x_m,y_m,speed_mps,serving_cell,serving_rsrp_dbm,serving_sinr_db,best_neighbor_cell,best_neighbor_rsrp_dbm,best_margin_db,candidate_cell,a3_hold_ms,ho_event,rlf_event,ping_pong,los_p";
+    // Fix 1+3: serving_d_m added; serving_cqi added after serving_sinr_db
+    m_tickCsv << "time_s,scenario_id,pattern,ue_id,x_m,y_m,speed_mps,"
+                 "serving_cell,serving_rsrp_dbm,serving_sinr_db,serving_d_m,serving_cqi,"
+                 "best_neighbor_cell,best_neighbor_rsrp_dbm,best_margin_db,"
+                 "candidate_cell,a3_hold_ms,ho_event,rlf_event,ping_pong,los_p";
     for (uint32_t i = 1; i <= kTopNeighborsToLog; ++i)
     {
       m_tickCsv << ",n" << i << "_id"
@@ -2105,7 +2139,9 @@ main(int argc, char* argv[])
   cmd.AddValue("seed", "RNG run seed", cli.seed);
   cmd.AddValue("tttMs", "A3 time-to-trigger in milliseconds", cli.tttMs);
   cmd.AddValue("hysDb", "A3 hysteresis in dB", cli.hysDb);
-  cmd.AddValue("outputPrefix", "Output prefix under workspace (example: results/ns3_md/s1_a_seed7)", cli.outputPrefix);
+  cmd.AddValue("outputPrefix",
+               "Output prefix for logs. If left at default, it auto-names under the dataset folder (example: dataset/s1_pA_seed7)",
+               cli.outputPrefix);
   cmd.Parse(argc, argv);
 
   auto catalog = BuildScenarioCatalog();
@@ -2115,12 +2151,38 @@ main(int argc, char* argv[])
   ScenarioSpec scenario = it->second;
   PatternSpec pattern = FindPattern(scenario, cli.pattern);
 
-  if (cli.outputPrefix == "results/ns3_md/run")
+  if (cli.outputPrefix == kDefaultOutputPrefix)
   {
-    std::ostringstream oss;
-    oss << "results/ns3_md/s" << scenario.id << "_p" << pattern.code << "_seed" << cli.seed;
-    cli.outputPrefix = oss.str();
+    std::filesystem::path root = std::filesystem::path(kDefaultOutputPrefix).parent_path();
+    std::ostringstream base;
+    base << "s" << scenario.id << "_p" << pattern.code << "_seed" << cli.seed;
+    cli.outputPrefix = (root / base.str()).string();
   }
+
+#ifdef _WIN32
+  {
+    const std::filesystem::path datasetRoot = R"(E:\5g_handover\dataset)";
+    std::filesystem::path outPrefix(cli.outputPrefix);
+
+    if (outPrefix.is_relative())
+    {
+      // If the user already passed something like "dataset/<name>", avoid nesting "dataset/dataset".
+      if (!outPrefix.empty() && outPrefix.begin() != outPrefix.end() && *outPrefix.begin() == "dataset")
+      {
+        std::filesystem::path remainder;
+        auto itPart = outPrefix.begin();
+        ++itPart;
+        for (; itPart != outPrefix.end(); ++itPart)
+        {
+          remainder /= *itPart;
+        }
+        outPrefix = remainder;
+      }
+
+      cli.outputPrefix = (datasetRoot / outPrefix).lexically_normal().string();
+    }
+  }
+#endif
 
   NS_ABORT_MSG_IF(cli.ueCount == 0, "ueCount must be >= 1");
   NS_ABORT_MSG_IF(cli.tttMs < 40, "tttMs should be >= 40");
