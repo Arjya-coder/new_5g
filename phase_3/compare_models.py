@@ -23,36 +23,103 @@ from phase_2.algo_2 import PPOAgent, RLModule
 
 
 class _NumpyActorPolicy:
-    """Fast NumPy forward-pass for the saved PPO actor (Dense/ReLU MLP)."""
+    """Fast NumPy forward-pass for the saved PPO actor (Dense MLP)."""
 
-    def __init__(self, w0: np.ndarray, b0: np.ndarray, w1: np.ndarray, b1: np.ndarray, w2: np.ndarray, b2: np.ndarray):
-        self.w0 = np.asarray(w0, dtype=np.float32)
-        self.b0 = np.asarray(b0, dtype=np.float32)
-        self.w1 = np.asarray(w1, dtype=np.float32)
-        self.b1 = np.asarray(b1, dtype=np.float32)
-        self.w2 = np.asarray(w2, dtype=np.float32)
-        self.b2 = np.asarray(b2, dtype=np.float32)
+    def __init__(self, layers: list[tuple[np.ndarray, np.ndarray, str]]):
+        self.layers = [(np.asarray(w, dtype=np.float32), np.asarray(b, dtype=np.float32), str(act)) for w, b, act in layers]
 
     @classmethod
-    def from_keras_sequential(cls, model) -> "_NumpyActorPolicy":
+    def from_keras_model(cls, model) -> "_NumpyActorPolicy":
         layers = list(getattr(model, "layers", []))
-        if len(layers) != 3:
-            raise ValueError(f"Expected actor to have 3 Dense layers, got {len(layers)}")
 
-        w0, b0 = layers[0].get_weights()
-        w1, b1 = layers[1].get_weights()
-        w2, b2 = layers[2].get_weights()
+        dense_layers: list[tuple[np.ndarray, np.ndarray, str]] = []
+        for layer in layers:
+            layer_type = layer.__class__.__name__
 
-        return cls(w0, b0, w1, b1, w2, b2)
+            if layer_type == "Dense":
+                weights = layer.get_weights()
+                if len(weights) != 2:
+                    raise ValueError(f"Dense layer weights unexpected: expected 2 arrays, got {len(weights)}")
+
+                w, b = weights
+                activation = getattr(layer, "activation", None)
+                act_name = getattr(activation, "__name__", "linear") if activation is not None else "linear"
+                dense_layers.append((w, b, act_name))
+                continue
+
+            get_weights = getattr(layer, "get_weights", None)
+            if callable(get_weights) and get_weights():
+                raise ValueError(
+                    f"Unsupported actor layer type '{layer_type}' with weights; "
+                    "NumPy policy only supports Dense MLP actors."
+                )
+
+        if not dense_layers:
+            raise ValueError("Actor model has no Dense layers; cannot build NumPy policy.")
+
+        return cls(dense_layers)
 
     def argmax_action(self, state: np.ndarray) -> int:
         x = np.asarray(state, dtype=np.float32).reshape(-1)
-        x = x @ self.w0 + self.b0
-        np.maximum(x, 0.0, out=x)
-        x = x @ self.w1 + self.b1
-        np.maximum(x, 0.0, out=x)
-        logits = x @ self.w2 + self.b2
-        return int(np.argmax(logits))
+        for w, b, act in self.layers:
+            x = x @ w + b
+
+            if act == "relu":
+                np.maximum(x, 0.0, out=x)
+            elif act in {"linear", "identity"}:
+                pass
+            elif act == "tanh":
+                np.tanh(x, out=x)
+            else:
+                raise ValueError(f"Unsupported activation '{act}' in actor; supported: relu, linear, tanh")
+
+        return int(np.argmax(x))
+
+
+def _approx_cqi_from_sinr(sinr_db: float) -> int:
+    """Match Phase-2 offline env CQI approximation."""
+    cqi = int(round((float(sinr_db) + 20.0) / 30.0 * 15.0))
+    return max(0, min(15, cqi))
+
+
+def _scenario_rlf_threshold_dbm(scenario_id: int) -> float:
+    """Match Phase-2 TrainingEnv RLF threshold logic."""
+    return {
+        1: -122.0,
+        2: -121.0,
+        3: -124.0,
+        4: -122.0,
+        5: -125.0,
+        6: -123.0,
+        7: -118.0,
+    }.get(int(scenario_id), -122.0)
+
+
+def _infer_state_dim(rl_module: RLModule) -> int:
+    dummy = {
+        "rsrp_serving_dbm": -100.0,
+        "sinr_serving_db": 0.0,
+        "cqi_serving": 10,
+        "distance_serving": 200.0,
+        "zone": "HANDOFF_ZONE",
+        "rsrp_neighbors": [-95.0, -105.0, -110.0],
+        "distance_neighbors": [250.0, 300.0, 350.0],
+        "signal_quality": "FAIR",
+        "velocity": 15.0,
+        "num_neighbors": 3,
+    }
+
+    state = rl_module.build_state_vector(
+        algo1_output=dummy,
+        ttt_eff=160,
+        hys_eff=3.0,
+        time_since_last_ho=0.0,
+        recent_rlf_count=0,
+        recent_pp_count=0,
+        recent_ho_count=0,
+        rsrp_prev=None,
+    )
+    return int(np.asarray(state).shape[0])
 
 
 def _collect_dataset_files(dataset_dir):
@@ -152,7 +219,9 @@ def _simulate_trajectory(ue_df,
     time_since_last_ho = 0.0
     recent_rlf_events = deque(maxlen=10)
     recent_pp_events = deque(maxlen=10)
+    recent_ho_events = deque(maxlen=10)
     rsrp_prev = None
+    in_handover = False
 
     # PPO parameters are carried forward step-by-step from selected actions.
     ttt_rule = 160
@@ -163,6 +232,8 @@ def _simulate_trajectory(ue_df,
 
     for _, row in ue_df.iterrows():
         now_s = float(row["time_s"])
+
+        scenario_id = int(row.get("scenario_id", 1))
 
         neighbor_ids, neighbor_rsrp, neighbor_sinr, neighbor_distances = _parse_neighbors(row)
 
@@ -187,10 +258,20 @@ def _simulate_trajectory(ue_df,
         else:
             ttt_eff, hys_eff = int(ttt_rule), float(hys_rule)
 
+        row_serving_cell = int(row["serving_cell"])
+        if row_serving_cell == int(serving_cell):
+            serving_cqi_raw = row.get("serving_cqi", None)
+            if serving_cqi_raw is not None and not pd.isna(serving_cqi_raw):
+                cqi_serving = int(serving_cqi_raw)
+            else:
+                cqi_serving = _approx_cqi_from_sinr(serving_sinr)
+        else:
+            cqi_serving = _approx_cqi_from_sinr(serving_sinr)
+
         decision = algo.step(
             rsrp_serving=serving_rsrp,
             sinr_serving=serving_sinr,
-            cqi_serving=10,
+            cqi_serving=int(cqi_serving),
             distance_serving=serving_distance,
             rsrp_neighbors=neighbor_rsrp,
             neighbor_ids=neighbor_ids,
@@ -201,6 +282,50 @@ def _simulate_trajectory(ue_df,
             HYS_eff=hys_eff,
         )
 
+        decision["scenario_id"] = int(scenario_id)
+
+        # --- Event detection (match Phase-2 TrainingEnv semantics) ---
+        rsrp_current = float(decision.get("rsrp_serving_dbm", serving_rsrp))
+
+        rlf_threshold = _scenario_rlf_threshold_dbm(scenario_id)
+        if rsrp_current < rlf_threshold:
+            rlf_counter += 1
+        else:
+            rlf_counter = 0
+
+        rlf_event = (rlf_counter >= 2)
+        if rlf_event:
+            rlf_counter = 0
+            total_rlfs += 1
+        recent_rlf_events.append(1 if rlf_event else 0)
+
+        target_cell = decision.get("target_cell_id", None)
+
+        if "ho_occurred" in decision:
+            ho_event = bool(decision.get("ho_occurred"))
+        else:
+            action_triggered = int(decision.get("action", 0))
+            ho_event = (action_triggered > 0 and target_cell is not None)
+
+        handover_occurred = False
+        if ho_event and not in_handover:
+            handover_occurred = True
+            in_handover = True
+        elif not ho_event:
+            in_handover = False
+
+        ping_pong_event = False
+        if handover_occurred and serving_cell is not None and target_cell is not None:
+            if (
+                prev_serving_cell == target_cell
+                and serving_cell != prev_serving_cell
+                and (now_s - last_ho_time) < 1.0
+            ):
+                ping_pong_event = True
+                total_ping_pongs += 1
+        recent_pp_events.append(1 if ping_pong_event else 0)
+        recent_ho_events.append(1 if handover_occurred else 0)
+
         if mode == "ppo":
             if actor_policy is None:
                 raise ValueError("actor_policy is required for mode='ppo'")
@@ -208,6 +333,7 @@ def _simulate_trajectory(ue_df,
             if steps_until_policy_update <= 0:
                 recent_rlf_count = sum(recent_rlf_events)
                 recent_pp_count = sum(recent_pp_events)
+                recent_ho_count = sum(recent_ho_events)
                 state = rl_module.build_state_vector(
                     algo1_output=decision,
                     ttt_eff=int(ttt_eff),
@@ -215,6 +341,7 @@ def _simulate_trajectory(ue_df,
                     time_since_last_ho=float(time_since_last_ho),
                     recent_rlf_count=int(recent_rlf_count),
                     recent_pp_count=int(recent_pp_count),
+                    recent_ho_count=int(recent_ho_count),
                     rsrp_prev=rsrp_prev,
                 )
                 action = actor_policy.argmax_action(state)
@@ -229,35 +356,12 @@ def _simulate_trajectory(ue_df,
 
             steps_until_policy_update = max(0, steps_until_policy_update - 1)
 
-        rsrp_prev = float(decision.get("rsrp_serving_dbm", serving_rsrp))
-
-        if serving_sinr < -20.0:
-            rlf_counter += 1
-        else:
-            rlf_counter = 0
-
-        rlf_event = (rlf_counter >= 2)
-        if rlf_event:
-            total_rlfs += 1
-        recent_rlf_events.append(1 if rlf_event else 0)
-
-        action_triggered = int(decision.get("action", 0))
-        target_cell = decision.get("target_cell_id", None)
-        ho_occurred = action_triggered > 0 and target_cell is not None
-
-        ping_pong_event = False
-        if ho_occurred and serving_cell is not None:
-            if (
-                prev_serving_cell == target_cell
-                and serving_cell != prev_serving_cell
-                and (now_s - last_ho_time) < 1.0
-            ):
-                ping_pong_event = True
-                total_ping_pongs += 1
-        recent_pp_events.append(1 if ping_pong_event else 0)
-
         time_since_last_ho += 0.1
-        if ho_occurred:
+
+        # Sync with Phase-2: update trend reference after building state.
+        rsrp_prev = float(rsrp_current)
+
+        if handover_occurred and target_cell is not None:
             total_handovers += 1
             prev_serving_cell = serving_cell
             serving_cell = int(target_cell)
@@ -354,10 +458,40 @@ def run_comparisons(dataset_dir,
     print(f"Loaded {len(csv_files)} Phase 3 dataset files from: {dataset_dir}")
     print(f"Using trained model from: {model_dir}")
 
-    rl_agent = PPOAgent(state_dim=22, action_dim=15)
+    rl_agent = PPOAgent()
     rl_agent.load(model_dir)
     rl_module = RLModule()
-    actor_policy = _NumpyActorPolicy.from_keras_sequential(rl_agent.actor)
+
+    expected_state_dim = _infer_state_dim(rl_module)
+
+    actor_input_shape = getattr(rl_agent.actor, "input_shape", None)
+    actor_output_shape = getattr(rl_agent.actor, "output_shape", None)
+    if isinstance(actor_input_shape, (list, tuple)) and actor_input_shape and isinstance(actor_input_shape[0], (list, tuple)):
+        actor_input_shape = actor_input_shape[0]
+    if isinstance(actor_output_shape, (list, tuple)) and actor_output_shape and isinstance(actor_output_shape[0], (list, tuple)):
+        actor_output_shape = actor_output_shape[0]
+
+    if not actor_input_shape or actor_input_shape[-1] is None:
+        raise RuntimeError("Could not determine actor input shape (state_dim) from loaded model.")
+    if not actor_output_shape or actor_output_shape[-1] is None:
+        raise RuntimeError("Could not determine actor output shape (action_dim) from loaded model.")
+
+    actor_state_dim = int(actor_input_shape[-1])
+    actor_action_dim = int(actor_output_shape[-1])
+
+    if actor_action_dim != 15:
+        raise RuntimeError(
+            f"Loaded actor action_dim={actor_action_dim} does not match expected 15. "
+            "Update Phase-2 PPOAgent.decode_action grid and retrain, or point to a compatible model."
+        )
+    if actor_state_dim != expected_state_dim:
+        raise RuntimeError(
+            f"State-dimension mismatch: actor expects {actor_state_dim} inputs, "
+            f"but current RLModule.build_state_vector outputs {expected_state_dim}. "
+            "Retrain Phase-2 model with the updated state, or use a matching --model-dir."
+        )
+
+    actor_policy = _NumpyActorPolicy.from_keras_model(rl_agent.actor)
 
     summary = {
         "Baseline": {"HOs": 0, "RLFs": 0, "PingPongs": 0},

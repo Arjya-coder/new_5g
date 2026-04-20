@@ -1,26 +1,26 @@
 {
   "dataset_dir": "E:\\5g_handover\\phase_3\\test_dataset",
-  "model_dir": "E:\\5g_handover\\phase_2\\models\\final",
+  "model_dir": "E:\\5g_handover\\phase_2\\models_fixed\\final",
   "baseline": {
     "ttt_ms": 250,
     "hys_db": 4.5,
     "metrics": {
-      "HOs": 232870,
-      "RLFs": 630310,
-      "PingPongs": 8815
+      "HOs": 139280,
+      "RLFs": 67340,
+      "PingPongs": 15870
     }
   },
   "ppo_agent": {
     "metrics": {
-      "HOs": 2999515,
-      "RLFs": 844380,
-      "PingPongs": 145715
+      "HOs": 25260,
+      "RLFs": 315525,
+      "PingPongs": 1725
     }
   },
   "improvements": {
-    "HO_reduction_percent": -1188.0641559668484,
-    "RLF_reduction_percent": -33.96265329758373,
-    "PingPong_reduction_percent": -1553.0346001134428
+    "HO_reduction_percent": 81.86387133831131,
+    "RLF_reduction_percent": -368.55509355509355,
+    "PingPong_reduction_percent": 89.13043478260869
   },
   "files_evaluated": 45
 }
