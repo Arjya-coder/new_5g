@@ -2,20 +2,20 @@
 
 This script:
 - Copies dataset.cpp into your ns-3 scratch/ folder in WSL (as md_scenarios.cc)
-- Runs the full scenario/pattern/seed matrix for Phase-2 PPO training
-- Saves outputs ONLY into this repo under dataset/
+- Runs scenario/pattern/seed matrix for Phase-2 PPO training
+- Saves outputs into repo-local dataset/
 
 Outputs per run:
 - <prefix>_tick.csv
 - <prefix>_events.csv
 - <prefix>_summary.json
 
-Typical usage (Windows PowerShell):
-  python run_training_dataset.py --preset full --clean
+Typical usage:
+  python run_training_dataset.py --preset full_compatible --clean
 
 Notes:
-- Requires WSL and an ns-3 checkout that supports: ./ns3 run "scratch/<prog> ..."
-- Defaults assume distro=Ubuntu and ns-3 root at ~/ns-3-dev.
+- Requires WSL and ns-3 checkout supporting:
+    ./ns3 run "scratch/<prog> ..."
 """
 
 from __future__ import annotations
@@ -38,10 +38,12 @@ WORKSPACE_ROOT = Path(__file__).resolve().parent
 CPP_SOURCE = WORKSPACE_ROOT / "dataset.cpp"
 LOCAL_OUT_DIR = WORKSPACE_ROOT / "dataset"
 
-
+# -----------------------------------------------------------------------------
+# PRESETS
+# -----------------------------------------------------------------------------
 PRESETS = {
-    # Phase-2 PPO training matrix (leakage-safe with seeds 1..5).
-    "full": {
+    # Old behavior (kept for reproducibility)
+    "full_legacy": {
         "scenarioIds": "1,2,3,4,5,6,7",
         "patterns": "A,B,C",
         "seedStart": 1,
@@ -52,11 +54,23 @@ PRESETS = {
         "tttMs": 160,
         "hysDb": 3.0,
     },
+    # New compatible default (aligns with upgraded algo_1 expectations)
+    "full_compatible": {
+        "scenarioIds": "1,2,3,4,5,6,7",
+        "patterns": "A,B,C",
+        "seedStart": 1,
+        "seedEnd": 5,
+        "seeds": "",
+        "ueCount": 20,
+        "duration": 0,
+        "tttMs": 240,
+        "hysDb": 4.5,
+    },
 }
 
 
 def _windows_path_to_wsl(path: Path) -> str:
-    """Convert an absolute Windows path like E:\foo\bar -> /mnt/e/foo/bar."""
+    """Convert absolute Windows path like E:\\foo\\bar -> /mnt/e/foo/bar."""
     resolved = path.resolve()
     drive = resolved.drive
     if not drive or not drive.endswith(":"):
@@ -70,7 +84,6 @@ def _windows_path_to_wsl(path: Path) -> str:
 
 
 def _run_wsl_bash(wsl: WslConfig, bash_cmd: str) -> subprocess.CompletedProcess:
-    """Run a bash command inside WSL."""
     cmd = ["wsl", "-d", wsl.distro, "-e", "bash", "-c", bash_cmd]
     return subprocess.run(cmd, capture_output=True, text=True)
 
@@ -82,6 +95,16 @@ def _parse_int_list(csv: str) -> List[int]:
         if not part:
             continue
         items.append(int(part))
+    return items
+
+
+def _parse_float_list(csv: str) -> List[float]:
+    items: List[float] = []
+    for part in csv.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        items.append(float(part))
     return items
 
 
@@ -132,7 +155,6 @@ def deploy_cpp_to_ns3_scratch(wsl: WslConfig) -> None:
         raise FileNotFoundError(f"Missing C++ generator: {CPP_SOURCE}")
 
     ws_wsl = _windows_path_to_wsl(WORKSPACE_ROOT)
-
     bash = (
         "set -euo pipefail; "
         f"cd {wsl.ns3_root}; "
@@ -156,10 +178,12 @@ def run_one(
     duration: int,
     ttt_ms: int,
     hys_db: float,
+    tag: str = "",
 ) -> Path:
     _ensure_local_dirs()
 
-    run_prefix = f"s{scenario_id}_p{pattern}_seed{seed}"
+    suffix = f"_ttt{ttt_ms}_hys{str(hys_db).replace('.', 'p')}" if tag else ""
+    run_prefix = f"s{scenario_id}_p{pattern}_seed{seed}{suffix}"
     local_prefix = LOCAL_OUT_DIR / run_prefix
 
     out_prefix_wsl = _windows_path_to_wsl(local_prefix)
@@ -212,36 +236,66 @@ def generate_matrix(
     seeds: Sequence[int],
     ue_count: int,
     duration: int,
-    ttt_ms: int,
-    hys_db: float,
+    ttt_values: Sequence[int],
+    hys_values: Sequence[float],
+    sweep_controls: bool,
 ) -> None:
-    total = len(scenario_ids) * len(patterns) * len(seeds)
+    if sweep_controls:
+        total = len(scenario_ids) * len(patterns) * len(seeds) * len(ttt_values) * len(hys_values)
+    else:
+        total = len(scenario_ids) * len(patterns) * len(seeds)
+
     done = 0
 
     print(f"Output directory : {LOCAL_OUT_DIR}")
     print(f"WSL distro       : {wsl.distro}")
     print(f"ns-3 root (WSL)  : {wsl.ns3_root}")
-    print(f"Matrix           : {len(scenario_ids)} scenarios × {len(patterns)} patterns × {len(seeds)} seeds = {total} runs")
     print(f"UE count         : {ue_count}")
     print(f"Duration         : {duration} (0 = pattern default)")
-    print(f"Generator params : tttMs={ttt_ms}, hysDb={hys_db}")
+    print(f"Sweep controls   : {sweep_controls}")
+    print(f"TTT values       : {list(ttt_values)}")
+    print(f"HYS values       : {list(hys_values)}")
+    print(f"Total runs       : {total}")
 
     for scenario_id in scenario_ids:
         for pattern in patterns:
             for seed in seeds:
-                done += 1
-                run_prefix = f"s{scenario_id}_p{pattern}_seed{seed}"
-                print(f"[{done:3d}/{total}] Generating {run_prefix} ...", flush=True)
-                run_one(
-                    wsl,
-                    scenario_id=scenario_id,
-                    pattern=pattern,
-                    seed=seed,
-                    ue_count=ue_count,
-                    duration=duration,
-                    ttt_ms=ttt_ms,
-                    hys_db=hys_db,
-                )
+                if sweep_controls:
+                    for ttt_ms in ttt_values:
+                        for hys_db in hys_values:
+                            done += 1
+                            run_name = f"s{scenario_id}_p{pattern}_seed{seed}_ttt{ttt_ms}_hys{hys_db}"
+                            print(f"[{done:4d}/{total}] Generating {run_name} ...", flush=True)
+                            run_one(
+                                wsl,
+                                scenario_id=scenario_id,
+                                pattern=pattern,
+                                seed=seed,
+                                ue_count=ue_count,
+                                duration=duration,
+                                ttt_ms=int(ttt_ms),
+                                hys_db=float(hys_db),
+                                tag="sweep",
+                            )
+                else:
+                    # single control setting
+                    ttt_ms = int(ttt_values[0])
+                    hys_db = float(hys_values[0])
+
+                    done += 1
+                    run_name = f"s{scenario_id}_p{pattern}_seed{seed}"
+                    print(f"[{done:4d}/{total}] Generating {run_name} ...", flush=True)
+                    run_one(
+                        wsl,
+                        scenario_id=scenario_id,
+                        pattern=pattern,
+                        seed=seed,
+                        ue_count=ue_count,
+                        duration=duration,
+                        ttt_ms=ttt_ms,
+                        hys_db=hys_db,
+                        tag="",
+                    )
 
     ticks = sorted(LOCAL_OUT_DIR.glob("*_tick.csv"))
     events = sorted(LOCAL_OUT_DIR.glob("*_events.csv"))
@@ -255,7 +309,7 @@ def generate_matrix(
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate Phase-2 PPO training datasets via WSL ns-3")
 
-    parser.add_argument("--preset", default="full", choices=sorted(PRESETS.keys()))
+    parser.add_argument("--preset", default="full_compatible", choices=sorted(PRESETS.keys()))
     parser.add_argument("--scenarioIds", default=None, help="Comma-separated scenario IDs (default from preset)")
     parser.add_argument("--patterns", default=None, help="Comma-separated patterns (A,B,C) (default from preset)")
 
@@ -265,11 +319,17 @@ def _parse_args() -> argparse.Namespace:
 
     parser.add_argument("--ueCount", type=int, default=None)
     parser.add_argument("--duration", type=int, default=None)
+
+    # Single-run controls (used when sweep_controls is False)
     parser.add_argument("--tttMs", type=int, default=None)
     parser.add_argument("--hysDb", type=float, default=None)
 
-    parser.add_argument("--clean", action="store_true", help="Delete existing *_tick/events/summary files from dataset/ first")
+    # Sweep controls (for richer training distribution)
+    parser.add_argument("--sweep-controls", action="store_true", help="Sweep TTT/HYS combinations")
+    parser.add_argument("--tttValues", default="200,240,280,300", help="Comma-separated TTT values for sweep")
+    parser.add_argument("--hysValues", default="4.0,4.5,5.0", help="Comma-separated HYS values for sweep")
 
+    parser.add_argument("--clean", action="store_true", help="Delete existing generated files from dataset/ first")
     parser.add_argument("--distro", default=os.environ.get("WSL_DISTRO", "Ubuntu"))
     parser.add_argument("--ns3Root", default=os.environ.get("NS3_ROOT", "~/ns-3-dev"))
 
@@ -278,7 +338,6 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = _parse_args()
-
     preset = dict(PRESETS[args.preset])
 
     scenario_ids = _parse_int_list(args.scenarioIds) if args.scenarioIds else _parse_int_list(preset["scenarioIds"])
@@ -291,8 +350,17 @@ def main() -> None:
 
     ue_count = int(args.ueCount) if args.ueCount is not None else int(preset["ueCount"])
     duration = int(args.duration) if args.duration is not None else int(preset["duration"])
-    ttt_ms = int(args.tttMs) if args.tttMs is not None else int(preset["tttMs"])
-    hys_db = float(args.hysDb) if args.hysDb is not None else float(preset["hysDb"])
+
+    if args.sweep_controls:
+        ttt_values = _parse_int_list(args.tttValues)
+        hys_values = _parse_float_list(args.hysValues)
+        if not ttt_values or not hys_values:
+            raise ValueError("When --sweep-controls is used, provide non-empty --tttValues and --hysValues")
+    else:
+        ttt_ms = int(args.tttMs) if args.tttMs is not None else int(preset["tttMs"])
+        hys_db = float(args.hysDb) if args.hysDb is not None else float(preset["hysDb"])
+        ttt_values = [ttt_ms]
+        hys_values = [hys_db]
 
     wsl = WslConfig(distro=str(args.distro), ns3_root=str(args.ns3Root))
 
@@ -300,15 +368,17 @@ def main() -> None:
         _clean_output_dir()
 
     deploy_cpp_to_ns3_scratch(wsl)
+
     generate_matrix(
-        wsl,
+        wsl=wsl,
         scenario_ids=scenario_ids,
         patterns=patterns,
         seeds=seeds,
         ue_count=ue_count,
         duration=duration,
-        ttt_ms=ttt_ms,
-        hys_db=hys_db,
+        ttt_values=ttt_values,
+        hys_values=hys_values,
+        sweep_controls=bool(args.sweep_controls),
     )
 
 

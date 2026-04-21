@@ -1,24 +1,20 @@
 """Phase-3 dataset generator runner (WSL ns-3).
 
 This script:
-- Copies phase_3/phase3_eval_scenarios.cc into your ns-3 scratch/ folder in WSL
-- Runs the full scenario/pattern/seed matrix
-- Saves outputs ONLY into this repo under phase_3/test_dataset
+- Copies phase_3/phase3_eval_scenarios.cc into ns-3 scratch as md_phase3.cc
+- Runs scenario/pattern/seed matrix for Phase-3 evaluation
+- Stores outputs under phase_3/test_dataset/
 
 Outputs per run:
 - <prefix>_tick.csv
 - <prefix>_events.csv
 - <prefix>_summary.json
 
-Typical usage (Windows PowerShell):
-  python phase_3/run_phase3_dataset.py --seedStart 11 --seedEnd 15
+Typical usage:
+  python -m phase_3.run_phase3_dataset --preset full --clean
 
-Quick usage (smaller + faster to evaluate):
-    python phase_3/run_phase3_dataset.py --preset quick --clean
-
-Notes:
-- Requires WSL and an ns-3 checkout that supports: ./ns3 run "scratch/<prog> ..."
-- Defaults assume distro=Ubuntu and ns-3 root at ~/ns-3-dev.
+Urban-only example:
+  python -m phase_3.run_phase3_dataset --preset urban_only --clean
 """
 
 from __future__ import annotations
@@ -37,38 +33,16 @@ class WslConfig:
     ns3_root: str
 
 
-WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
-CPP_SOURCE = WORKSPACE_ROOT / "phase_3" / "phase3_eval_scenarios.cc"
-LOCAL_OUT_DIR = WORKSPACE_ROOT / "phase_3" / "test_dataset"
+THIS_DIR = Path(__file__).resolve().parent
+REPO_ROOT = THIS_DIR.parent
+
+CPP_SOURCE = THIS_DIR / "phase3_eval_scenarios.cc"
+LOCAL_OUT_DIR = THIS_DIR / "test_dataset"
 
 
 PRESETS = {
-    # Five realistic real-world scenarios (new default matrix).
+    # Original phase-3 matrix
     "full": {
-        "scenarioIds": "11,12,13,14,15",
-        "patterns": "A,B,C",
-        "seedStart": 11,
-        "seedEnd": 15,
-        "seeds": "",
-        "ueCount": 20,
-        "duration": 0,
-    },
-    # Fast-but-representative matrix over the new realistic set:
-    # - urban CBD (11), highway interchange (13), event surge (14)
-    # - patterns B/C (dynamic + stop-go variants)
-    # - two seeds for basic robustness
-    # - reduced UE count and fixed duration for faster local validation
-    "quick": {
-        "scenarioIds": "11,13,14",
-        "patterns": "B,C",
-        "seedStart": 11,
-        "seedEnd": 12,
-        "seeds": "",
-        "ueCount": 8,
-        "duration": 300,
-    },
-    # Original unseen set kept for backward compatibility.
-    "legacy": {
         "scenarioIds": "8,9,10",
         "patterns": "A,B,C",
         "seedStart": 11,
@@ -76,19 +50,32 @@ PRESETS = {
         "seeds": "",
         "ueCount": 20,
         "duration": 0,
+        "tttMs": 250,
+        "hysDb": 4.5,
+    },
+    # Urban focused (avoid rural for now)
+    "urban_only": {
+        "scenarioIds": "8,9",
+        "patterns": "A,B,C",
+        "seedStart": 11,
+        "seedEnd": 15,
+        "seeds": "",
+        "ueCount": 20,
+        "duration": 0,
+        "tttMs": 250,
+        "hysDb": 4.5,
     },
 }
 
 
 def _windows_path_to_wsl(path: Path) -> str:
-    """Convert an absolute Windows path like E:\foo\bar -> /mnt/e/foo/bar."""
+    """Convert absolute Windows path like E:\\foo\\bar -> /mnt/e/foo/bar."""
     resolved = path.resolve()
     drive = resolved.drive
     if not drive or not drive.endswith(":"):
         raise ValueError(f"Unsupported path (expected drive letter): {resolved}")
 
     drive_letter = drive[0].lower()
-    # parts[0] is like 'E:\\'
     parts = resolved.parts
     rel_parts = parts[1:]
     rel_posix = "/".join(rel_parts)
@@ -96,31 +83,29 @@ def _windows_path_to_wsl(path: Path) -> str:
 
 
 def _run_wsl_bash(wsl: WslConfig, bash_cmd: str) -> subprocess.CompletedProcess:
-    """Run a bash command inside WSL."""
     cmd = ["wsl", "-d", wsl.distro, "-e", "bash", "-c", bash_cmd]
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
 def _parse_int_list(csv: str) -> List[int]:
-    items: List[int] = []
-    for part in csv.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        items.append(int(part))
-    return items
+    out = []
+    for x in csv.split(","):
+        x = x.strip()
+        if x:
+            out.append(int(x))
+    return out
 
 
 def _parse_pattern_list(csv: str) -> List[str]:
-    items: List[str] = []
-    for part in csv.split(","):
-        part = part.strip().upper()
-        if not part:
+    out = []
+    for x in csv.split(","):
+        x = x.strip().upper()
+        if not x:
             continue
-        if part not in {"A", "B", "C"}:
-            raise ValueError(f"Invalid pattern '{part}'. Use A,B,C.")
-        items.append(part)
-    return items
+        if x not in {"A", "B", "C"}:
+            raise ValueError(f"Invalid pattern '{x}', expected A/B/C")
+        out.append(x)
+    return out
 
 
 def _expand_seeds(seed_start: int, seed_end: int, explicit: Sequence[int] | None) -> List[int]:
@@ -131,12 +116,11 @@ def _expand_seeds(seed_start: int, seed_end: int, explicit: Sequence[int] | None
     return list(range(int(seed_start), int(seed_end) + 1))
 
 
-def _ensure_local_dirs() -> None:
+def _ensure_local_dirs():
     LOCAL_OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _clean_output_dir() -> None:
-    """Delete generated Phase-3 outputs in phase_3/test_dataset."""
+def _clean_output_dir():
     if not LOCAL_OUT_DIR.exists():
         return
 
@@ -148,43 +132,50 @@ def _clean_output_dir() -> None:
                 removed += 1
             except FileNotFoundError:
                 pass
-
     print(f"Cleaned {removed} files from {LOCAL_OUT_DIR}")
 
 
-def deploy_cpp_to_ns3_scratch(wsl: WslConfig) -> None:
+def deploy_cpp_to_ns3_scratch(wsl: WslConfig):
+    """Copy phase3_eval_scenarios.cc into ns-3 scratch as md_phase3.cc."""
     if not CPP_SOURCE.exists():
-        raise FileNotFoundError(f"Missing C++ generator: {CPP_SOURCE}")
+        raise FileNotFoundError(f"Missing C++ scenario generator: {CPP_SOURCE}")
 
-    ws_wsl = _windows_path_to_wsl(WORKSPACE_ROOT)
+    ws_wsl = _windows_path_to_wsl(THIS_DIR)
 
     bash = (
         "set -euo pipefail; "
         f"cd {wsl.ns3_root}; "
-        f"cp {ws_wsl}/phase_3/phase3_eval_scenarios.cc scratch/phase3_eval_scenarios.cc"
+        f"cp {ws_wsl}/phase3_eval_scenarios.cc scratch/md_phase3.cc"
     )
 
     result = _run_wsl_bash(wsl, bash)
     if result.returncode != 0:
         raise RuntimeError(
-            "Failed to deploy C++ file into ns-3 scratch.\n"
+            "Failed to deploy phase3_eval_scenarios.cc to ns-3 scratch.\n"
             f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
         )
 
 
-def run_one(wsl: WslConfig, scenario_id: int, pattern: str, seed: int, ue_count: int, duration: int, ttt_ms: int, hys_db: float) -> Path:
+def run_one(
+    wsl: WslConfig,
+    scenario_id: int,
+    pattern: str,
+    seed: int,
+    ue_count: int,
+    duration: int,
+    ttt_ms: int,
+    hys_db: float,
+) -> Path:
     _ensure_local_dirs()
 
     run_prefix = f"s{scenario_id}_p{pattern}_seed{seed}"
     local_prefix = LOCAL_OUT_DIR / run_prefix
 
     out_prefix_wsl = _windows_path_to_wsl(local_prefix)
-
-    # Ensure the output dir exists from inside WSL (in case WSL can't see a just-created Windows dir yet).
     out_dir_wsl = _windows_path_to_wsl(LOCAL_OUT_DIR)
 
     ns3_args = (
-        "scratch/phase3_eval_scenarios "
+        "scratch/md_phase3 "
         f"--scenarioId={scenario_id} "
         f"--pattern={pattern} "
         f"--seed={seed} "
@@ -205,7 +196,7 @@ def run_one(wsl: WslConfig, scenario_id: int, pattern: str, seed: int, ue_count:
     result = _run_wsl_bash(wsl, bash)
     if result.returncode != 0:
         raise RuntimeError(
-            f"ns-3 run failed for {run_prefix}.\n"
+            f"ns-3 run failed for {run_prefix}\n"
             f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
         )
 
@@ -216,8 +207,7 @@ def run_one(wsl: WslConfig, scenario_id: int, pattern: str, seed: int, ue_count:
     missing = [p for p in (tick, events, summary) if not p.exists()]
     if missing:
         raise RuntimeError(
-            "ns-3 run completed but expected outputs are missing in phase_3/test_dataset:\n"
-            + "\n".join(str(p) for p in missing)
+            "Run finished but outputs missing:\n" + "\n".join(str(p) for p in missing)
         )
 
     return local_prefix
@@ -232,123 +222,108 @@ def generate_matrix(
     duration: int,
     ttt_ms: int,
     hys_db: float,
-) -> None:
-    deploy_cpp_to_ns3_scratch(wsl)
-
+):
     total = len(scenario_ids) * len(patterns) * len(seeds)
     done = 0
+
+    print(f"Output directory : {LOCAL_OUT_DIR}")
+    print(f"WSL distro       : {wsl.distro}")
+    print(f"ns-3 root (WSL)  : {wsl.ns3_root}")
+    print(f"Matrix           : {len(scenario_ids)} scenarios × {len(patterns)} patterns × {len(seeds)} seeds = {total}")
+    print(f"UE count         : {ue_count}")
+    print(f"Duration         : {duration} (0 = pattern default)")
+    print(f"Static params    : tttMs={ttt_ms}, hysDb={hys_db}")
 
     for scenario_id in scenario_ids:
         for pattern in patterns:
             for seed in seeds:
                 done += 1
-                print(f"[{done}/{total}] scenario={scenario_id} pattern={pattern} seed={seed}")
+                run_name = f"s{scenario_id}_p{pattern}_seed{seed}"
+                print(f"[{done:3d}/{total}] Generating {run_name} ...", flush=True)
+
                 run_one(
                     wsl=wsl,
-                    scenario_id=int(scenario_id),
-                    pattern=str(pattern),
-                    seed=int(seed),
-                    ue_count=int(ue_count),
-                    duration=int(duration),
-                    ttt_ms=int(ttt_ms),
-                    hys_db=float(hys_db),
+                    scenario_id=scenario_id,
+                    pattern=pattern,
+                    seed=seed,
+                    ue_count=ue_count,
+                    duration=duration,
+                    ttt_ms=ttt_ms,
+                    hys_db=hys_db,
                 )
 
+    ticks = sorted(LOCAL_OUT_DIR.glob("*_tick.csv"))
+    events = sorted(LOCAL_OUT_DIR.glob("*_events.csv"))
+    summaries = sorted(LOCAL_OUT_DIR.glob("*_summary.json"))
 
-def _build_arg_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Generate Phase-3 unseen ns-3 datasets into phase_3/test_dataset")
+    print("\nGeneration complete.")
+    print(f"  tick files   : {len(ticks)}")
+    print(f"  events files : {len(events)}")
+    print(f"  summary files: {len(summaries)}")
 
-    p.add_argument(
-        "--preset",
-        default="full",
-        choices=sorted(PRESETS.keys()),
-        help="Dataset preset to use (default: full)",
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Generate Phase-3 evaluation dataset via WSL ns-3")
+
+    parser.add_argument("--preset", default="full", choices=sorted(PRESETS.keys()))
+    parser.add_argument("--scenarioIds", default=None, help="Comma-separated scenario IDs (override preset)")
+    parser.add_argument("--patterns", default=None, help="Comma-separated patterns A,B,C (override preset)")
+
+    parser.add_argument("--seedStart", type=int, default=None)
+    parser.add_argument("--seedEnd", type=int, default=None)
+    parser.add_argument("--seeds", default=None, help="Optional explicit comma-separated seed list")
+
+    parser.add_argument("--ueCount", type=int, default=None)
+    parser.add_argument("--duration", type=int, default=None)
+    parser.add_argument("--tttMs", type=int, default=None)
+    parser.add_argument("--hysDb", type=float, default=None)
+
+    parser.add_argument("--clean", action="store_true", help="Delete old generated files first")
+
+    parser.add_argument("--distro", default=os.environ.get("WSL_DISTRO", "Ubuntu"))
+    parser.add_argument("--ns3Root", default=os.environ.get("NS3_ROOT", "~/ns-3-dev"))
+
+    return parser.parse_args()
+
+
+def main():
+    args = _parse_args()
+    preset = dict(PRESETS[args.preset])
+
+    scenario_ids = _parse_int_list(args.scenarioIds) if args.scenarioIds else _parse_int_list(preset["scenarioIds"])
+    patterns = _parse_pattern_list(args.patterns) if args.patterns else _parse_pattern_list(preset["patterns"])
+
+    seed_start = int(args.seedStart) if args.seedStart is not None else int(preset["seedStart"])
+    seed_end = int(args.seedEnd) if args.seedEnd is not None else int(preset["seedEnd"])
+    explicit_seeds = _parse_int_list(args.seeds) if args.seeds else []
+    seeds = _expand_seeds(seed_start, seed_end, explicit_seeds)
+
+    ue_count = int(args.ueCount) if args.ueCount is not None else int(preset["ueCount"])
+    duration = int(args.duration) if args.duration is not None else int(preset["duration"])
+    ttt_ms = int(args.tttMs) if args.tttMs is not None else int(preset["tttMs"])
+    hys_db = float(args.hysDb) if args.hysDb is not None else float(preset["hysDb"])
+
+    wsl = WslConfig(
+        distro=str(args.distro),
+        ns3_root=str(args.ns3Root),
     )
-    p.add_argument(
-        "--clean",
-        action="store_true",
-        help="Delete existing generated outputs in phase_3/test_dataset before regenerating",
-    )
 
-    p.add_argument("--scenarioIds", default="11,12,13,14,15", help="Comma-separated scenario IDs (default: 11,12,13,14,15)")
-    p.add_argument("--patterns", default="A,B,C", help="Comma-separated patterns (default: A,B,C)")
-
-    p.add_argument("--seedStart", type=int, default=11, help="Seed range start (inclusive)")
-    p.add_argument("--seedEnd", type=int, default=15, help="Seed range end (inclusive)")
-    p.add_argument("--seeds", default="", help="Optional explicit comma-separated seeds (overrides seedStart/seedEnd)")
-
-    p.add_argument("--ueCount", type=int, default=20, help="Number of UEs per run")
-    p.add_argument("--duration", type=int, default=0, help="Duration seconds (0 uses pattern default)")
-    p.add_argument("--tttMs", type=int, default=160, help="TTT in ms used by generator HO engine")
-    p.add_argument("--hysDb", type=float, default=3.0, help="Hysteresis in dB used by generator HO engine")
-
-    p.add_argument("--wslDistro", default="Ubuntu", help="WSL distro name (default: Ubuntu)")
-    p.add_argument("--wslNs3Root", default="~/ns-3-dev", help="ns-3 root path inside WSL (default: ~/ns-3-dev)")
-
-    return p
-
-
-def main() -> int:
-    args = _build_arg_parser().parse_args()
-
-    preset = PRESETS.get(str(args.preset))
-    if not preset:
-        raise ValueError(f"Unknown preset: {args.preset}")
-
-    # Apply preset (explicit CLI args can still override by passing them after --preset).
-    # We keep this simple: preset becomes the baseline, then argparse-provided values win.
-    # (Users who want pure preset behavior can just pass --preset ... with no overrides.)
-    if args.scenarioIds == _build_arg_parser().get_default("scenarioIds"):
-        args.scenarioIds = preset["scenarioIds"]
-    if args.patterns == _build_arg_parser().get_default("patterns"):
-        args.patterns = preset["patterns"]
-    if args.seedStart == _build_arg_parser().get_default("seedStart"):
-        args.seedStart = preset["seedStart"]
-    if args.seedEnd == _build_arg_parser().get_default("seedEnd"):
-        args.seedEnd = preset["seedEnd"]
-    if str(args.seeds) == _build_arg_parser().get_default("seeds"):
-        args.seeds = preset["seeds"]
-    if args.ueCount == _build_arg_parser().get_default("ueCount"):
-        args.ueCount = preset["ueCount"]
-    if args.duration == _build_arg_parser().get_default("duration"):
-        args.duration = preset["duration"]
-
-    wsl = WslConfig(distro=str(args.wslDistro), ns3_root=str(args.wslNs3Root))
-
-    scenario_ids = _parse_int_list(str(args.scenarioIds))
-    patterns = _parse_pattern_list(str(args.patterns))
-
-    explicit_seeds = _parse_int_list(str(args.seeds)) if str(args.seeds).strip() else None
-    seeds = _expand_seeds(int(args.seedStart), int(args.seedEnd), explicit_seeds)
-
-    if any(sid not in {8, 9, 10, 11, 12, 13, 14, 15} for sid in scenario_ids):
-        raise ValueError("Phase-3 generator supports scenarioIds {8,9,10,11,12,13,14,15}.")
-
-    os.makedirs(LOCAL_OUT_DIR, exist_ok=True)
-
-    if bool(args.clean):
+    if args.clean:
         _clean_output_dir()
 
-    print(f"Workspace: {WORKSPACE_ROOT}")
-    print(f"Output dir: {LOCAL_OUT_DIR}")
-    print(f"WSL: distro={wsl.distro} ns3_root={wsl.ns3_root}")
-    print(f"Preset: {args.preset}")
-    print(f"Matrix: scenarios={scenario_ids} patterns={patterns} seeds={seeds} ueCount={int(args.ueCount)} duration={int(args.duration)}")
+    deploy_cpp_to_ns3_scratch(wsl)
 
     generate_matrix(
         wsl=wsl,
         scenario_ids=scenario_ids,
         patterns=patterns,
         seeds=seeds,
-        ue_count=int(args.ueCount),
-        duration=int(args.duration),
-        ttt_ms=int(args.tttMs),
-        hys_db=float(args.hysDb),
+        ue_count=ue_count,
+        duration=duration,
+        ttt_ms=ttt_ms,
+        hys_db=hys_db,
     )
-
-    print("Done. Outputs are in phase_3/test_dataset")
-    return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

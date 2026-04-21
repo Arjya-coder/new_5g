@@ -2,7 +2,7 @@ import os
 import pandas as pd
 import multiprocessing
 from functools import partial
-from run_pipeline import evaluate_algo1_from_csv
+from datasetgen.run_pipeline import evaluate_algo1_from_csv
 
 def process_file(args):
     scenario_id, pattern, seed, local_baseline_dir = args
