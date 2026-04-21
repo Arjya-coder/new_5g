@@ -12,7 +12,7 @@ import pandas as pd
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# Append parent dir so we can import models from phase_2 and phase_1
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO_ROOT not in sys.path:
     sys.path.append(REPO_ROOT)
@@ -23,10 +23,13 @@ from phase_2.algo_2 import PPOAgent, RLModule
 
 
 class _NumpyActorPolicy:
-    """Fast NumPy forward-pass for the saved PPO actor (Dense MLP)."""
+    """Fast NumPy forward-pass for Dense MLP actor models."""
 
     def __init__(self, layers: list[tuple[np.ndarray, np.ndarray, str]]):
-        self.layers = [(np.asarray(w, dtype=np.float32), np.asarray(b, dtype=np.float32), str(act)) for w, b, act in layers]
+        self.layers = [
+            (np.asarray(w, dtype=np.float32), np.asarray(b, dtype=np.float32), str(act))
+            for w, b, act in layers
+        ]
 
     @classmethod
     def from_keras_model(cls, model) -> "_NumpyActorPolicy":
@@ -39,11 +42,17 @@ class _NumpyActorPolicy:
             if layer_type == "Dense":
                 weights = layer.get_weights()
                 if len(weights) != 2:
-                    raise ValueError(f"Dense layer weights unexpected: expected 2 arrays, got {len(weights)}")
+                    raise ValueError(
+                        f"Dense layer weights unexpected: expected 2 arrays, got {len(weights)}"
+                    )
 
                 w, b = weights
                 activation = getattr(layer, "activation", None)
-                act_name = getattr(activation, "__name__", "linear") if activation is not None else "linear"
+                act_name = (
+                    getattr(activation, "__name__", "linear")
+                    if activation is not None
+                    else "linear"
+                )
                 dense_layers.append((w, b, act_name))
                 continue
 
@@ -71,19 +80,19 @@ class _NumpyActorPolicy:
             elif act == "tanh":
                 np.tanh(x, out=x)
             else:
-                raise ValueError(f"Unsupported activation '{act}' in actor; supported: relu, linear, tanh")
+                raise ValueError(
+                    f"Unsupported activation '{act}' in actor; supported: relu, linear, tanh"
+                )
 
         return int(np.argmax(x))
 
 
 def _approx_cqi_from_sinr(sinr_db: float) -> int:
-    """Match Phase-2 offline env CQI approximation."""
     cqi = int(round((float(sinr_db) + 20.0) / 30.0 * 15.0))
     return max(0, min(15, cqi))
 
 
 def _scenario_rlf_threshold_dbm(scenario_id: int) -> float:
-    """Match Phase-2 TrainingEnv RLF threshold logic."""
     return {
         1: -122.0,
         2: -121.0,
@@ -92,6 +101,14 @@ def _scenario_rlf_threshold_dbm(scenario_id: int) -> float:
         5: -125.0,
         6: -123.0,
         7: -118.0,
+        8: -120.0,
+        9: -123.0,
+        10: -126.0,
+        11: -124.0,
+        12: -123.0,
+        13: -127.0,
+        14: -121.0,
+        15: -125.0,
     }.get(int(scenario_id), -122.0)
 
 
@@ -122,15 +139,13 @@ def _infer_state_dim(rl_module: RLModule) -> int:
     return int(np.asarray(state).shape[0])
 
 
-def _collect_dataset_files(dataset_dir):
-    """Collect supported Phase 3 files (*_tick.csv and *_test_noise.csv)."""
+def _collect_dataset_files(dataset_dir: str) -> list[str]:
     tick_files = glob.glob(os.path.join(dataset_dir, "*_tick.csv"))
     noise_files = glob.glob(os.path.join(dataset_dir, "*_test_noise.csv"))
-    files = sorted(set(tick_files + noise_files))
-    return files
+    return sorted(set(tick_files + noise_files))
 
 
-def _parse_neighbors(row, max_neighbors=6):
+def _parse_neighbors(row, max_neighbors: int = 6):
     neighbor_ids = []
     neighbor_rsrp = []
     neighbor_sinr = []
@@ -156,17 +171,14 @@ def _find_neighbor_index(neighbor_ids, target_cell):
     return None
 
 
-def _resolve_serving_measurements(row,
-                                  serving_cell,
-                                  neighbor_ids,
-                                  neighbor_rsrp,
-                                  neighbor_sinr,
-                                  neighbor_distances):
-    """
-    Resolve serving metrics for the currently connected cell.
-    If the current serving cell differs from row['serving_cell'], we try to
-    reconstruct from neighbor columns.
-    """
+def _resolve_serving_measurements(
+    row,
+    serving_cell,
+    neighbor_ids,
+    neighbor_rsrp,
+    neighbor_sinr,
+    neighbor_distances,
+):
     row_serving_cell = int(row["serving_cell"])
 
     if row_serving_cell == serving_cell:
@@ -190,23 +202,21 @@ def _resolve_serving_measurements(row,
     return serving_rsrp, serving_sinr, serving_distance
 
 
-def _simulate_trajectory(ue_df,
-                         algo,
-                         mode,
-                         baseline_ttt,
-                         baseline_hys,
-                         rl_agent=None,
-                         rl_module=None,
-                         actor_policy: _NumpyActorPolicy | None = None,
-                         control_interval_steps: int = 1):
-    """
-    Simulate one UE trajectory.
-
-    mode='baseline': static TTT/HYS baseline.
-    mode='ppo':      use trained PPO policy with 1-step lag, matching training loop behavior.
-    """
-    if mode not in {"baseline", "ppo"}:
-        raise ValueError("mode must be 'baseline' or 'ppo'")
+def _simulate_trajectory(
+    ue_df,
+    algo,
+    mode,
+    static_ttt,
+    static_hys,
+    ppo_init_ttt=160,
+    ppo_init_hys=3.0,
+    rl_agent=None,
+    rl_module=None,
+    actor_policy: _NumpyActorPolicy | None = None,
+    control_interval_steps: int = 5,
+):
+    if mode not in {"algo1", "algo2", "ppo"}:
+        raise ValueError("mode must be one of {'algo1', 'algo2', 'ppo'}")
 
     total_handovers = 0
     total_rlfs = 0
@@ -223,16 +233,14 @@ def _simulate_trajectory(ue_df,
     rsrp_prev = None
     in_handover = False
 
-    # PPO parameters are carried forward step-by-step from selected actions.
-    ttt_rule = 160
-    hys_rule = 3.0
+    ttt_rule = int(ppo_init_ttt)
+    hys_rule = float(ppo_init_hys)
 
     control_interval_steps = int(max(1, control_interval_steps))
     steps_until_policy_update = 0
 
     for _, row in ue_df.iterrows():
         now_s = float(row["time_s"])
-
         scenario_id = int(row.get("scenario_id", 1))
 
         neighbor_ids, neighbor_rsrp, neighbor_sinr, neighbor_distances = _parse_neighbors(row)
@@ -253,10 +261,10 @@ def _simulate_trajectory(ue_df,
 
         velocity = float(row.get("speed_mps", 15.0))
 
-        if mode == "baseline":
-            ttt_eff, hys_eff = int(baseline_ttt), float(baseline_hys)
-        else:
+        if mode == "ppo":
             ttt_eff, hys_eff = int(ttt_rule), float(hys_rule)
+        else:
+            ttt_eff, hys_eff = int(static_ttt), float(static_hys)
 
         row_serving_cell = int(row["serving_cell"])
         if row_serving_cell == int(serving_cell):
@@ -281,10 +289,8 @@ def _simulate_trajectory(ue_df,
             TTT_eff=ttt_eff,
             HYS_eff=hys_eff,
         )
-
         decision["scenario_id"] = int(scenario_id)
 
-        # --- Event detection (match Phase-2 TrainingEnv semantics) ---
         rsrp_current = float(decision.get("rsrp_serving_dbm", serving_rsrp))
 
         rlf_threshold = _scenario_rlf_threshold_dbm(scenario_id)
@@ -293,7 +299,7 @@ def _simulate_trajectory(ue_df,
         else:
             rlf_counter = 0
 
-        rlf_event = (rlf_counter >= 2)
+        rlf_event = rlf_counter >= 2
         if rlf_event:
             rlf_counter = 0
             total_rlfs += 1
@@ -305,7 +311,7 @@ def _simulate_trajectory(ue_df,
             ho_event = bool(decision.get("ho_occurred"))
         else:
             action_triggered = int(decision.get("action", 0))
-            ho_event = (action_triggered > 0 and target_cell is not None)
+            ho_event = action_triggered > 0 and target_cell is not None
 
         handover_occurred = False
         if ho_event and not in_handover:
@@ -323,25 +329,23 @@ def _simulate_trajectory(ue_df,
             ):
                 ping_pong_event = True
                 total_ping_pongs += 1
+
         recent_pp_events.append(1 if ping_pong_event else 0)
         recent_ho_events.append(1 if handover_occurred else 0)
 
         if mode == "ppo":
-            if actor_policy is None:
-                raise ValueError("actor_policy is required for mode='ppo'")
+            if actor_policy is None or rl_agent is None or rl_module is None:
+                raise ValueError("rl_agent, rl_module, and actor_policy are required for mode='ppo'")
 
             if steps_until_policy_update <= 0:
-                recent_rlf_count = sum(recent_rlf_events)
-                recent_pp_count = sum(recent_pp_events)
-                recent_ho_count = sum(recent_ho_events)
                 state = rl_module.build_state_vector(
                     algo1_output=decision,
                     ttt_eff=int(ttt_eff),
                     hys_eff=float(hys_eff),
                     time_since_last_ho=float(time_since_last_ho),
-                    recent_rlf_count=int(recent_rlf_count),
-                    recent_pp_count=int(recent_pp_count),
-                    recent_ho_count=int(recent_ho_count),
+                    recent_rlf_count=int(sum(recent_rlf_events)),
+                    recent_pp_count=int(sum(recent_pp_events)),
+                    recent_ho_count=int(sum(recent_ho_events)),
                     rsrp_prev=rsrp_prev,
                 )
                 action = actor_policy.argmax_action(state)
@@ -357,8 +361,6 @@ def _simulate_trajectory(ue_df,
             steps_until_policy_update = max(0, steps_until_policy_update - 1)
 
         time_since_last_ho += 0.1
-
-        # Sync with Phase-2: update trend reference after building state.
         rsrp_prev = float(rsrp_current)
 
         if handover_occurred and target_cell is not None:
@@ -377,38 +379,71 @@ def _simulate_trajectory(ue_df,
     }
 
 
-def _safe_improvement(baseline_value, ppo_value):
-    if baseline_value == 0:
+def _safe_improvement(reference_value, candidate_value):
+    if reference_value == 0:
         return 0.0
-    return ((baseline_value - ppo_value) / baseline_value) * 100.0
+    return ((reference_value - candidate_value) / reference_value) * 100.0
 
 
-def _plot_summary(results, output_png, baseline_ttt, baseline_hys):
+def _build_improvement_triplet(reference_metrics, candidate_metrics):
+    return {
+        "HO_reduction_percent": _safe_improvement(reference_metrics["HOs"], candidate_metrics["HOs"]),
+        "RLF_reduction_percent": _safe_improvement(reference_metrics["RLFs"], candidate_metrics["RLFs"]),
+        "PingPong_reduction_percent": _safe_improvement(
+            reference_metrics["PingPongs"], candidate_metrics["PingPongs"]
+        ),
+    }
+
+
+def _plot_summary(results, output_png, algo1_ttt, algo1_hys, algo2_ttt, algo2_hys):
     os.makedirs(os.path.dirname(output_png), exist_ok=True)
 
-    baseline_vals = [results["Baseline"]["HOs"], results["Baseline"]["RLFs"], results["Baseline"]["PingPongs"]]
-    ppo_vals = [results["PPO_Agent"]["HOs"], results["PPO_Agent"]["RLFs"], results["PPO_Agent"]["PingPongs"]]
     metric_labels = ["Handovers", "RLF", "Ping-Pong"]
 
-    improvements = [
-        _safe_improvement(results["Baseline"]["HOs"], results["PPO_Agent"]["HOs"]),
-        _safe_improvement(results["Baseline"]["RLFs"], results["PPO_Agent"]["RLFs"]),
-        _safe_improvement(results["Baseline"]["PingPongs"], results["PPO_Agent"]["PingPongs"]),
+    algo1_vals = [results["Algo1"]["HOs"], results["Algo1"]["RLFs"], results["Algo1"]["PingPongs"]]
+    algo2_vals = [results["Algo2"]["HOs"], results["Algo2"]["RLFs"], results["Algo2"]["PingPongs"]]
+    ppo_vals = [results["PPO"]["HOs"], results["PPO"]["RLFs"], results["PPO"]["PingPongs"]]
+
+    ppo_vs_algo1 = [
+        _safe_improvement(results["Algo1"]["HOs"], results["PPO"]["HOs"]),
+        _safe_improvement(results["Algo1"]["RLFs"], results["PPO"]["RLFs"]),
+        _safe_improvement(results["Algo1"]["PingPongs"], results["PPO"]["PingPongs"]),
+    ]
+    ppo_vs_algo2 = [
+        _safe_improvement(results["Algo2"]["HOs"], results["PPO"]["HOs"]),
+        _safe_improvement(results["Algo2"]["RLFs"], results["PPO"]["RLFs"]),
+        _safe_improvement(results["Algo2"]["PingPongs"], results["PPO"]["PingPongs"]),
     ]
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
-    fig.suptitle(
-        "Phase 3 Deployment Validation: Baseline vs Trained PPO",
-        fontsize=13,
-        fontweight="bold",
-    )
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    fig.suptitle("Phase-3 Validation: Algo1 vs Algo2 vs PPO", fontsize=13, fontweight="bold")
 
     x = np.arange(len(metric_labels))
-    width = 0.35
+    width = 0.26
 
     ax = axes[0]
-    bars1 = ax.bar(x - width / 2, baseline_vals, width, label=f"Baseline (TTT={int(baseline_ttt)}, HYS={baseline_hys:.1f})", color="#1f77b4")
-    bars2 = ax.bar(x + width / 2, ppo_vals, width, label="Trained PPO", color="#ff7f0e")
+    bars_a1 = ax.bar(
+        x - width,
+        algo1_vals,
+        width,
+        label=f"Algo1 (TTT={int(algo1_ttt)}, HYS={algo1_hys:.1f})",
+        color="#1f77b4",
+    )
+    bars_a2 = ax.bar(
+        x,
+        algo2_vals,
+        width,
+        label=f"Algo2 (TTT={int(algo2_ttt)}, HYS={algo2_hys:.1f})",
+        color="#2ca02c",
+    )
+    bars_ppo = ax.bar(
+        x + width,
+        ppo_vals,
+        width,
+        label="PPO",
+        color="#ff7f0e",
+    )
+
     ax.set_xticks(x)
     ax.set_xticklabels(metric_labels)
     ax.set_ylabel("Total Count")
@@ -416,34 +451,59 @@ def _plot_summary(results, output_png, baseline_ttt, baseline_hys):
     ax.grid(True, axis="y", linestyle="--", alpha=0.4)
     ax.legend()
 
-    for bar in list(bars1) + list(bars2):
+    for bar in list(bars_a1) + list(bars_a2) + list(bars_ppo):
         h = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width() / 2.0, h + max(1.0, h * 0.01), f"{int(h)}", ha="center", va="bottom", fontsize=9)
+        ax.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            h + max(1.0, h * 0.01),
+            f"{int(h)}",
+            ha="center",
+            va="bottom",
+            fontsize=9,
+        )
 
     ax2 = axes[1]
-    colors = ["#2ca02c" if v >= 0 else "#d62728" for v in improvements]
-    bars = ax2.bar(metric_labels, improvements, color=colors)
+    bars_vs_a1 = ax2.bar(x - width / 2.0, ppo_vs_algo1, width, label="PPO vs Algo1", color="#17becf")
+    bars_vs_a2 = ax2.bar(x + width / 2.0, ppo_vs_algo2, width, label="PPO vs Algo2", color="#9467bd")
+
     ax2.axhline(0.0, color="black", linewidth=0.8)
-    ax2.set_ylabel("Improvement over Baseline (%)")
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(metric_labels)
+    ax2.set_ylabel("Improvement (%)")
     ax2.set_title("Relative Improvement")
     ax2.grid(True, axis="y", linestyle="--", alpha=0.4)
+    ax2.legend()
 
-    for bar, val in zip(bars, improvements):
-        y = bar.get_height()
-        offset = 0.8 if y >= 0 else -1.2
-        ax2.text(bar.get_x() + bar.get_width() / 2.0, y + offset, f"{val:+.1f}%", ha="center", va="bottom", fontsize=9)
+    for bars in (bars_vs_a1, bars_vs_a2):
+        for bar in bars:
+            y = bar.get_height()
+            offset = 0.8 if y >= 0 else -1.2
+            ax2.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                y + offset,
+                f"{y:+.1f}%",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
 
     plt.tight_layout()
     plt.savefig(output_png, dpi=150, bbox_inches="tight")
     plt.close(fig)
 
 
-def run_comparisons(dataset_dir,
-                    model_dir,
-                    output_dir,
-                    baseline_ttt=250,
-                    baseline_hys=4.5,
-                    control_interval_steps: int = 1):
+def run_comparisons(
+    dataset_dir,
+    model_dir,
+    output_dir,
+    algo1_ttt=250,
+    algo1_hys=4.5,
+    algo2_ttt=160,
+    algo2_hys=3.0,
+    ppo_init_ttt=160,
+    ppo_init_hys=3.0,
+    control_interval_steps: int = 5,
+):
     csv_files = _collect_dataset_files(dataset_dir)
     if not csv_files:
         raise RuntimeError(f"No supported dataset files found in: {dataset_dir}")
@@ -455,7 +515,7 @@ def run_comparisons(dataset_dir,
             f"Trained model not found at {model_dir}. Expected actor.h5 and critic.h5."
         )
 
-    print(f"Loaded {len(csv_files)} Phase 3 dataset files from: {dataset_dir}")
+    print(f"Loaded {len(csv_files)} Phase-3 dataset files from: {dataset_dir}")
     print(f"Using trained model from: {model_dir}")
 
     rl_agent = PPOAgent()
@@ -466,9 +526,17 @@ def run_comparisons(dataset_dir,
 
     actor_input_shape = getattr(rl_agent.actor, "input_shape", None)
     actor_output_shape = getattr(rl_agent.actor, "output_shape", None)
-    if isinstance(actor_input_shape, (list, tuple)) and actor_input_shape and isinstance(actor_input_shape[0], (list, tuple)):
+    if (
+        isinstance(actor_input_shape, (list, tuple))
+        and actor_input_shape
+        and isinstance(actor_input_shape[0], (list, tuple))
+    ):
         actor_input_shape = actor_input_shape[0]
-    if isinstance(actor_output_shape, (list, tuple)) and actor_output_shape and isinstance(actor_output_shape[0], (list, tuple)):
+    if (
+        isinstance(actor_output_shape, (list, tuple))
+        and actor_output_shape
+        and isinstance(actor_output_shape[0], (list, tuple))
+    ):
         actor_output_shape = actor_output_shape[0]
 
     if not actor_input_shape or actor_input_shape[-1] is None:
@@ -494,8 +562,9 @@ def run_comparisons(dataset_dir,
     actor_policy = _NumpyActorPolicy.from_keras_model(rl_agent.actor)
 
     summary = {
-        "Baseline": {"HOs": 0, "RLFs": 0, "PingPongs": 0},
-        "PPO_Agent": {"HOs": 0, "RLFs": 0, "PingPongs": 0},
+        "Algo1": {"HOs": 0, "RLFs": 0, "PingPongs": 0},
+        "Algo2": {"HOs": 0, "RLFs": 0, "PingPongs": 0},
+        "PPO": {"HOs": 0, "RLFs": 0, "PingPongs": 0},
     }
     per_file_rows = []
 
@@ -505,56 +574,75 @@ def run_comparisons(dataset_dir,
             print(f"Skipping {os.path.basename(file_path)} (missing ue_id column)")
             continue
 
-        base_metrics = {"HOs": 0, "RLFs": 0, "PingPongs": 0}
+        algo1_metrics = {"HOs": 0, "RLFs": 0, "PingPongs": 0}
+        algo2_metrics = {"HOs": 0, "RLFs": 0, "PingPongs": 0}
         ppo_metrics = {"HOs": 0, "RLFs": 0, "PingPongs": 0}
 
         for _, ue_df in df.groupby("ue_id"):
             ue_df = ue_df.sort_values("time_s").reset_index(drop=True)
 
-            base_algo = Phase1Algo()
-            m_base = _simulate_trajectory(
+            m_algo1 = _simulate_trajectory(
                 ue_df,
-                base_algo,
-                mode="baseline",
-                baseline_ttt=baseline_ttt,
-                baseline_hys=baseline_hys,
+                Phase1Algo(),
+                mode="algo1",
+                static_ttt=algo1_ttt,
+                static_hys=algo1_hys,
                 control_interval_steps=control_interval_steps,
             )
-
-            ppo_algo = Algo2Baseline()
+            m_algo2 = _simulate_trajectory(
+                ue_df,
+                Algo2Baseline(),
+                mode="algo2",
+                static_ttt=algo2_ttt,
+                static_hys=algo2_hys,
+                control_interval_steps=control_interval_steps,
+            )
             m_ppo = _simulate_trajectory(
                 ue_df,
-                ppo_algo,
+                Algo2Baseline(),
                 mode="ppo",
-                baseline_ttt=baseline_ttt,
-                baseline_hys=baseline_hys,
+                static_ttt=algo2_ttt,
+                static_hys=algo2_hys,
+                ppo_init_ttt=ppo_init_ttt,
+                ppo_init_hys=ppo_init_hys,
                 rl_agent=rl_agent,
                 rl_module=rl_module,
                 actor_policy=actor_policy,
                 control_interval_steps=control_interval_steps,
             )
 
-            for k in base_metrics:
-                base_metrics[k] += m_base[k]
+            for k in algo1_metrics:
+                algo1_metrics[k] += m_algo1[k]
+                algo2_metrics[k] += m_algo2[k]
                 ppo_metrics[k] += m_ppo[k]
 
-        for k in summary["Baseline"]:
-            summary["Baseline"][k] += base_metrics[k]
-            summary["PPO_Agent"][k] += ppo_metrics[k]
+        for k in summary["Algo1"]:
+            summary["Algo1"][k] += algo1_metrics[k]
+            summary["Algo2"][k] += algo2_metrics[k]
+            summary["PPO"][k] += ppo_metrics[k]
 
         per_file_rows.append(
             {
                 "file": os.path.basename(file_path),
-                "algorithm": "Baseline",
-                "HOs": base_metrics["HOs"],
-                "RLFs": base_metrics["RLFs"],
-                "PingPongs": base_metrics["PingPongs"],
+                "algorithm": "Algo1",
+                "HOs": algo1_metrics["HOs"],
+                "RLFs": algo1_metrics["RLFs"],
+                "PingPongs": algo1_metrics["PingPongs"],
             }
         )
         per_file_rows.append(
             {
                 "file": os.path.basename(file_path),
-                "algorithm": "PPO_Agent",
+                "algorithm": "Algo2",
+                "HOs": algo2_metrics["HOs"],
+                "RLFs": algo2_metrics["RLFs"],
+                "PingPongs": algo2_metrics["PingPongs"],
+            }
+        )
+        per_file_rows.append(
+            {
+                "file": os.path.basename(file_path),
+                "algorithm": "PPO",
                 "HOs": ppo_metrics["HOs"],
                 "RLFs": ppo_metrics["RLFs"],
                 "PingPongs": ppo_metrics["PingPongs"],
@@ -569,21 +657,29 @@ def run_comparisons(dataset_dir,
     pd.DataFrame(per_file_rows).to_csv(per_file_csv, index=False)
 
     improvements = {
-        "HO_reduction_percent": _safe_improvement(summary["Baseline"]["HOs"], summary["PPO_Agent"]["HOs"]),
-        "RLF_reduction_percent": _safe_improvement(summary["Baseline"]["RLFs"], summary["PPO_Agent"]["RLFs"]),
-        "PingPong_reduction_percent": _safe_improvement(summary["Baseline"]["PingPongs"], summary["PPO_Agent"]["PingPongs"]),
+        "ppo_vs_algo1": _build_improvement_triplet(summary["Algo1"], summary["PPO"]),
+        "ppo_vs_algo2": _build_improvement_triplet(summary["Algo2"], summary["PPO"]),
+        "algo2_vs_algo1": _build_improvement_triplet(summary["Algo1"], summary["Algo2"]),
     }
 
     summary_payload = {
         "dataset_dir": dataset_dir,
         "model_dir": model_dir,
-        "baseline": {
-            "ttt_ms": int(baseline_ttt),
-            "hys_db": float(baseline_hys),
-            "metrics": summary["Baseline"],
+        "algo1": {
+            "ttt_ms": int(algo1_ttt),
+            "hys_db": float(algo1_hys),
+            "metrics": summary["Algo1"],
         },
-        "ppo_agent": {
-            "metrics": summary["PPO_Agent"],
+        "algo2": {
+            "ttt_ms": int(algo2_ttt),
+            "hys_db": float(algo2_hys),
+            "metrics": summary["Algo2"],
+        },
+        "ppo": {
+            "init_ttt_ms": int(ppo_init_ttt),
+            "init_hys_db": float(ppo_init_hys),
+            "control_interval_steps": int(control_interval_steps),
+            "metrics": summary["PPO"],
         },
         "improvements": improvements,
         "files_evaluated": len(csv_files),
@@ -594,21 +690,43 @@ def run_comparisons(dataset_dir,
         json.dump(summary_payload, f, indent=2)
 
     plot_path = os.path.join(output_dir, "comparison_results_v3.png")
-    _plot_summary(summary, plot_path, baseline_ttt=baseline_ttt, baseline_hys=baseline_hys)
+    _plot_summary(
+        summary,
+        plot_path,
+        algo1_ttt=algo1_ttt,
+        algo1_hys=algo1_hys,
+        algo2_ttt=algo2_ttt,
+        algo2_hys=algo2_hys,
+    )
 
-    print("\n--- PHASE 3 SUMMARY ---")
-    print("Baseline:")
-    print(f"  HOs:       {summary['Baseline']['HOs']}")
-    print(f"  RLFs:      {summary['Baseline']['RLFs']}")
-    print(f"  PingPongs: {summary['Baseline']['PingPongs']}")
-    print("PPO Agent:")
-    print(f"  HOs:       {summary['PPO_Agent']['HOs']}")
-    print(f"  RLFs:      {summary['PPO_Agent']['RLFs']}")
-    print(f"  PingPongs: {summary['PPO_Agent']['PingPongs']}")
-    print("Improvements over baseline:")
-    print(f"  HO reduction:        {improvements['HO_reduction_percent']:+.2f}%")
-    print(f"  RLF reduction:       {improvements['RLF_reduction_percent']:+.2f}%")
-    print(f"  PingPong reduction:  {improvements['PingPong_reduction_percent']:+.2f}%")
+    print("\n--- PHASE-3 SUMMARY ---")
+    print("Algo1:")
+    print(f"  HOs:       {summary['Algo1']['HOs']}")
+    print(f"  RLFs:      {summary['Algo1']['RLFs']}")
+    print(f"  PingPongs: {summary['Algo1']['PingPongs']}")
+    print("Algo2:")
+    print(f"  HOs:       {summary['Algo2']['HOs']}")
+    print(f"  RLFs:      {summary['Algo2']['RLFs']}")
+    print(f"  PingPongs: {summary['Algo2']['PingPongs']}")
+    print("PPO:")
+    print(f"  HOs:       {summary['PPO']['HOs']}")
+    print(f"  RLFs:      {summary['PPO']['RLFs']}")
+    print(f"  PingPongs: {summary['PPO']['PingPongs']}")
+
+    print("Improvements:")
+    print(
+        "  PPO vs Algo1: "
+        f"HO {improvements['ppo_vs_algo1']['HO_reduction_percent']:+.2f}%, "
+        f"RLF {improvements['ppo_vs_algo1']['RLF_reduction_percent']:+.2f}%, "
+        f"PP {improvements['ppo_vs_algo1']['PingPong_reduction_percent']:+.2f}%"
+    )
+    print(
+        "  PPO vs Algo2: "
+        f"HO {improvements['ppo_vs_algo2']['HO_reduction_percent']:+.2f}%, "
+        f"RLF {improvements['ppo_vs_algo2']['RLF_reduction_percent']:+.2f}%, "
+        f"PP {improvements['ppo_vs_algo2']['PingPong_reduction_percent']:+.2f}%"
+    )
+
     print(f"\nSaved per-file metrics: {per_file_csv}")
     print(f"Saved summary JSON:     {summary_json}")
     print(f"Saved plot:             {plot_path}")
@@ -616,22 +734,30 @@ def run_comparisons(dataset_dir,
 
 def _build_arg_parser():
     default_dataset_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_dataset")
-    default_model_dir = os.path.join(REPO_ROOT, "phase_2", "models", "final")
+    default_model_dir = os.path.join(REPO_ROOT, "phase_2", "models_rlf_fix", "final")
     default_output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plots")
 
     parser = argparse.ArgumentParser(
-        description="Phase 3 evaluator: compare Phase 1 baseline vs Phase 2 trained PPO model"
+        description="Phase-3 evaluator: compare algo_1, algo_2 baseline, and trained PPO"
     )
-    parser.add_argument("--dataset-dir", default=default_dataset_dir, help="Directory containing Phase 3 CSV files")
+    parser.add_argument("--dataset-dir", default=default_dataset_dir, help="Directory containing Phase-3 CSV files")
     parser.add_argument("--model-dir", default=default_model_dir, help="Directory containing actor.h5 and critic.h5")
-    parser.add_argument("--output-dir", default=default_output_dir, help="Directory to save Phase 3 outputs")
-    parser.add_argument("--baseline-ttt", type=int, default=250, help="Baseline static TTT (ms)")
-    parser.add_argument("--baseline-hys", type=float, default=4.5, help="Baseline static HYS (dB)")
+    parser.add_argument("--output-dir", default=default_output_dir, help="Directory to save Phase-3 outputs")
+
+    parser.add_argument("--algo1-ttt", type=int, default=250, help="Algo1 static TTT (ms)")
+    parser.add_argument("--algo1-hys", type=float, default=4.5, help="Algo1 static HYS (dB)")
+
+    parser.add_argument("--algo2-ttt", type=int, default=160, help="Algo2 static TTT (ms)")
+    parser.add_argument("--algo2-hys", type=float, default=3.0, help="Algo2 static HYS (dB)")
+
+    parser.add_argument("--ppo-init-ttt", type=int, default=160, help="PPO initial TTT before policy updates (ms)")
+    parser.add_argument("--ppo-init-hys", type=float, default=3.0, help="PPO initial HYS before policy updates (dB)")
+
     parser.add_argument(
         "--control-interval-steps",
         type=int,
-        default=1,
-        help="Hold PPO-selected TTT/HYS for N ticks before next policy update (default: 1).",
+        default=5,
+        help="Hold PPO-selected TTT/HYS for N ticks before next policy update (default: 5).",
     )
     return parser
 
@@ -642,7 +768,11 @@ if __name__ == "__main__":
         dataset_dir=args.dataset_dir,
         model_dir=args.model_dir,
         output_dir=args.output_dir,
-        baseline_ttt=args.baseline_ttt,
-        baseline_hys=args.baseline_hys,
+        algo1_ttt=args.algo1_ttt,
+        algo1_hys=args.algo1_hys,
+        algo2_ttt=args.algo2_ttt,
+        algo2_hys=args.algo2_hys,
+        ppo_init_ttt=args.ppo_init_ttt,
+        ppo_init_hys=args.ppo_init_hys,
         control_interval_steps=args.control_interval_steps,
     )

@@ -366,6 +366,134 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     out[s.id] = s;
   }
 
+  {
+    ScenarioSpec s;
+    s.id = 11;
+    s.name = "Dense Urban CBD + Metro Corridor";
+    s.xMin = 0.0;
+    s.xMax = 1600.0;
+    s.yMin = 0.0;
+    s.yMax = 1600.0;
+    s.rlfThresholdDbm = -124.0;
+    s.fallbackThresholdDbm = -111.0;
+
+    for (double x : {250.0, 800.0, 1350.0})
+      for (double y : {250.0, 800.0, 1350.0})
+        AddGnb(s.gnbs, x, y, 35.0, 42.0);
+
+    for (double y : {300.0, 500.0, 700.0, 900.0, 1100.0, 1300.0})
+      AddGnb(s.gnbs, 800.0, y, 12.0, 30.0);
+
+    s.patterns.push_back({"A", "CBD Ring Taxi Flow", 600.0});
+    s.patterns.push_back({"B", "Metro Corridor Rush", 600.0});
+    s.patterns.push_back({"C", "Last-Mile Pedestrian Mesh", 600.0});
+    out[s.id] = s;
+  }
+
+  {
+    ScenarioSpec s;
+    s.id = 12;
+    s.name = "Suburban Commute + School Zone";
+    s.xMin = 0.0;
+    s.xMax = 3200.0;
+    s.yMin = 0.0;
+    s.yMax = 1800.0;
+    s.rlfThresholdDbm = -123.0;
+    s.fallbackThresholdDbm = -110.0;
+
+    for (double x : {300.0, 1000.0, 1700.0, 2400.0, 3000.0})
+      AddGnb(s.gnbs, x, 900.0, 30.0, 43.0);
+
+    AddGnb(s.gnbs, 1500.0, 780.0, 12.0, 30.0);
+    AddGnb(s.gnbs, 1500.0, 1020.0, 12.0, 30.0);
+    AddGnb(s.gnbs, 2300.0, 900.0, 12.0, 30.0);
+
+    s.patterns.push_back({"A", "Morning Inbound Commute", 600.0});
+    s.patterns.push_back({"B", "School Bus Stop-Go", 620.0});
+    s.patterns.push_back({"C", "Evening Outbound Commute", 600.0});
+    out[s.id] = s;
+  }
+
+  {
+    ScenarioSpec s;
+    s.id = 13;
+    s.name = "Highway + Interchange Shockwave";
+    s.xMin = 0.0;
+    s.xMax = 10000.0;
+    s.yMin = -800.0;
+    s.yMax = 800.0;
+    s.rlfThresholdDbm = -127.0;
+    s.fallbackThresholdDbm = -115.0;
+
+    for (double x : {300.0, 1700.0, 3100.0, 4500.0, 5900.0, 7300.0, 8700.0})
+      AddGnb(s.gnbs, x, 0.0, 40.0, 46.0);
+
+    AddGnb(s.gnbs, 4500.0, 260.0, 18.0, 33.0);
+    AddGnb(s.gnbs, 4500.0, -260.0, 18.0, 33.0);
+    AddGnb(s.gnbs, 5200.0, 0.0, 18.0, 33.0);
+
+    s.patterns.push_back({"A", "Free-Flow Highway", 650.0});
+    s.patterns.push_back({"B", "Congestion Shockwave", 650.0});
+    s.patterns.push_back({"C", "Service-Road Detour", 700.0});
+    out[s.id] = s;
+  }
+
+  {
+    ScenarioSpec s;
+    s.id = 14;
+    s.name = "Stadium Event Surge";
+    s.xMin = 0.0;
+    s.xMax = 2200.0;
+    s.yMin = 0.0;
+    s.yMax = 2200.0;
+    s.rlfThresholdDbm = -121.0;
+    s.fallbackThresholdDbm = -109.0;
+
+    AddGnb(s.gnbs, 250.0, 250.0, 32.0, 44.0);
+    AddGnb(s.gnbs, 1950.0, 250.0, 32.0, 44.0);
+    AddGnb(s.gnbs, 1950.0, 1950.0, 32.0, 44.0);
+    AddGnb(s.gnbs, 250.0, 1950.0, 32.0, 44.0);
+
+    AddGnb(s.gnbs, 1100.0, 900.0, 16.0, 34.0);
+    AddGnb(s.gnbs, 900.0, 1100.0, 16.0, 34.0);
+    AddGnb(s.gnbs, 1300.0, 1100.0, 16.0, 34.0);
+    AddGnb(s.gnbs, 1100.0, 1300.0, 16.0, 34.0);
+    AddGnb(s.gnbs, 1100.0, 1100.0, 18.0, 36.0);
+
+    s.patterns.push_back({"A", "Pre-Event Inflow", 600.0});
+    s.patterns.push_back({"B", "Post-Event Egress", 620.0});
+    s.patterns.push_back({"C", "Ride-Hailing Venue Loop", 600.0});
+    out[s.id] = s;
+  }
+
+  {
+    ScenarioSpec s;
+    s.id = 15;
+    s.name = "Industrial Port + Crane Blockage";
+    s.xMin = 0.0;
+    s.xMax = 4000.0;
+    s.yMin = -1200.0;
+    s.yMax = 1200.0;
+    s.rlfThresholdDbm = -125.0;
+    s.fallbackThresholdDbm = -112.0;
+
+    AddGnb(s.gnbs, 400.0, 0.0, 38.0, 44.0);
+    AddGnb(s.gnbs, 1700.0, 0.0, 38.0, 44.0);
+    AddGnb(s.gnbs, 3000.0, 0.0, 38.0, 44.0);
+    AddGnb(s.gnbs, 3800.0, 0.0, 38.0, 44.0);
+
+    AddGnb(s.gnbs, 1500.0, 600.0, 18.0, 32.0);
+    AddGnb(s.gnbs, 1500.0, -600.0, 18.0, 32.0);
+    AddGnb(s.gnbs, 2500.0, 600.0, 18.0, 32.0);
+    AddGnb(s.gnbs, 2500.0, -600.0, 18.0, 32.0);
+    AddGnb(s.gnbs, 3200.0, 300.0, 18.0, 32.0);
+
+    s.patterns.push_back({"A", "Truck Yard Loop", 650.0});
+    s.patterns.push_back({"B", "Rail Crossing Shuttle", 650.0});
+    s.patterns.push_back({"C", "Quay-Side Loading Flow", 680.0});
+    out[s.id] = s;
+  }
+
   return out;
 }
 
@@ -470,6 +598,27 @@ private:
     case 10:
       AddBuilding(3600.0, 4400.0, -170.0, -60.0, 25.0);
       AddBuilding(3600.0, 4400.0, 60.0, 170.0, 25.0);
+      break;
+    case 11:
+      GenerateGridBuildings(80.0, 20.0, 0.78, 45.0, 110.0);
+      break;
+    case 12:
+      GenerateGridBuildings(120.0, 40.0, 0.45, 12.0, 30.0);
+      break;
+    case 13:
+      AddBuilding(4250.0, 4750.0, -520.0, -220.0, 18.0);
+      AddBuilding(4250.0, 4750.0, 220.0, 520.0, 18.0);
+      AddBuilding(4900.0, 5350.0, -320.0, 320.0, 26.0);
+      break;
+    case 14:
+      GenerateGridBuildings(95.0, 25.0, 0.50, 20.0, 45.0);
+      break;
+    case 15:
+      AddBuilding(1300.0, 2900.0, -850.0, -520.0, 35.0);
+      AddBuilding(1300.0, 2900.0, 520.0, 850.0, 35.0);
+      AddBuilding(1500.0, 1750.0, -200.0, 200.0, 42.0);
+      AddBuilding(2100.0, 2350.0, -200.0, 200.0, 42.0);
+      AddBuilding(2700.0, 2950.0, -200.0, 200.0, 42.0);
       break;
     default:
       break;
@@ -647,6 +796,252 @@ private:
     return tp;
   }
 
+  TrajectoryPoint SampleScenario11(const UeRuntime& ue, double t) const
+  {
+    TrajectoryPoint tp;
+    double local = t + ue.phaseOffsetS;
+
+    if (m_pattern.code == "A") {
+      double speed = 13.0;
+      std::vector<Vector> route = {
+        Vector(200.0, 220.0, 1.5), Vector(1400.0, 220.0, 1.5),
+        Vector(1400.0, 1400.0, 1.5), Vector(200.0, 1400.0, 1.5),
+        Vector(200.0, 220.0, 1.5),
+      };
+      tp.position = SampleAlongPolyline(route, speed * local, true);
+      tp.speedMps = speed;
+      tp.turning = (Dist2d(tp.position, Vector(200.0, 220.0, 1.5)) < 40.0) ||
+                   (Dist2d(tp.position, Vector(1400.0, 220.0, 1.5)) < 40.0) ||
+                   (Dist2d(tp.position, Vector(1400.0, 1400.0, 1.5)) < 40.0) ||
+                   (Dist2d(tp.position, Vector(200.0, 1400.0, 1.5)) < 40.0);
+      return tp;
+    }
+
+    if (m_pattern.code == "B") {
+      std::vector<Vector> waypoints = {
+        Vector(800.0, 80.0, 1.5), Vector(800.0, 360.0, 1.5),
+        Vector(800.0, 640.0, 1.5), Vector(800.0, 920.0, 1.5),
+        Vector(800.0, 1240.0, 1.5), Vector(800.0, 1520.0, 1.5),
+        Vector(800.0, 80.0, 1.5),
+      };
+      TrajectoryPoint out = SampleStopGoWaypoints(waypoints, 22.0, 12.0, t, ue.phaseOffsetS);
+      out.turning = (Dist2d(out.position, Vector(800.0, 360.0, 1.5)) < 8.0) ||
+                    (Dist2d(out.position, Vector(800.0, 920.0, 1.5)) < 8.0) ||
+                    (Dist2d(out.position, Vector(800.0, 1240.0, 1.5)) < 8.0);
+      return out;
+    }
+
+    std::vector<Vector> waypoints = {
+      Vector(500.0, 500.0, 1.5), Vector(800.0, 500.0, 1.5),
+      Vector(1100.0, 500.0, 1.5), Vector(1100.0, 900.0, 1.5),
+      Vector(800.0, 900.0, 1.5), Vector(500.0, 900.0, 1.5),
+      Vector(500.0, 500.0, 1.5),
+    };
+    TrajectoryPoint out = SampleStopGoWaypoints(waypoints, 1.7, 18.0, t, ue.phaseOffsetS);
+    out.turning = (Dist2d(out.position, Vector(500.0, 500.0, 1.5)) < 8.0) ||
+                  (Dist2d(out.position, Vector(1100.0, 500.0, 1.5)) < 8.0) ||
+                  (Dist2d(out.position, Vector(1100.0, 900.0, 1.5)) < 8.0) ||
+                  (Dist2d(out.position, Vector(500.0, 900.0, 1.5)) < 8.0);
+    return out;
+  }
+
+  TrajectoryPoint SampleScenario12(const UeRuntime& ue, double t) const
+  {
+    TrajectoryPoint tp;
+    double local = t + ue.phaseOffsetS;
+
+    if (m_pattern.code == "A") {
+      double speed = 20.0;
+      std::vector<Vector> route = {
+        Vector(80.0, 500.0, 1.5), Vector(900.0, 780.0, 1.5),
+        Vector(1500.0, 900.0, 1.5), Vector(2300.0, 1080.0, 1.5),
+        Vector(3080.0, 1300.0, 1.5), Vector(80.0, 500.0, 1.5),
+      };
+      tp.position = SampleAlongPolyline(route, speed * local, true);
+      tp.speedMps = speed;
+      tp.turning = (Dist2d(tp.position, Vector(1500.0, 900.0, 1.5)) < 25.0);
+      return tp;
+    }
+
+    if (m_pattern.code == "B") {
+      std::vector<Vector> waypoints = {
+        Vector(120.0, 900.0, 1.5), Vector(900.0, 900.0, 1.5),
+        Vector(1500.0, 900.0, 1.5), Vector(2100.0, 900.0, 1.5),
+        Vector(2920.0, 900.0, 1.5), Vector(120.0, 900.0, 1.5),
+      };
+      TrajectoryPoint out = SampleStopGoWaypoints(waypoints, 12.0, 18.0, t, ue.phaseOffsetS);
+      out.turning = (Dist2d(out.position, Vector(1500.0, 900.0, 1.5)) < 15.0);
+      return out;
+    }
+
+    double speed = 19.0;
+    std::vector<Vector> route = {
+      Vector(3120.0, 1320.0, 1.5), Vector(2400.0, 1100.0, 1.5),
+      Vector(1500.0, 900.0, 1.5), Vector(900.0, 760.0, 1.5),
+      Vector(80.0, 500.0, 1.5), Vector(3120.0, 1320.0, 1.5),
+    };
+    tp.position = SampleAlongPolyline(route, speed * local, true);
+    tp.speedMps = speed;
+    tp.turning = (Dist2d(tp.position, Vector(1500.0, 900.0, 1.5)) < 20.0);
+    return tp;
+  }
+
+  double HighwayShockwaveDistance(double t) const
+  {
+    double cycle = 80.0;
+    double phase = std::fmod(t, cycle);
+    if (phase < 0.0) phase += cycle;
+
+    uint64_t laps = static_cast<uint64_t>(std::floor(t / cycle));
+    double base = static_cast<double>(laps) * 2275.0;
+
+    if (phase < 20.0)
+      return base + 20.0 * phase + 0.375 * phase * phase;
+    if (phase < 55.0)
+      return base + 550.0 + 35.0 * (phase - 20.0);
+
+    double dt = phase - 55.0;
+    return base + 1775.0 + 35.0 * dt - 0.6 * dt * dt;
+  }
+
+  double HighwayShockwaveSpeed(double t) const
+  {
+    double phase = std::fmod(t, 80.0);
+    if (phase < 0.0) phase += 80.0;
+    if (phase < 20.0) return 20.0 + 0.75 * phase;
+    if (phase < 55.0) return 35.0;
+    return 35.0 - 1.2 * (phase - 55.0);
+  }
+
+  TrajectoryPoint SampleScenario13(const UeRuntime& ue, double t) const
+  {
+    TrajectoryPoint tp;
+    double local = t + ue.phaseOffsetS;
+    double yLane = ue.lateralOffsetM * 12.0;
+
+    if (m_pattern.code == "A") {
+      double speed = 33.0;
+      double x = std::fmod(speed * local, 10000.0);
+      if (x < 0.0) x += 10000.0;
+      tp.position = Vector(x, yLane, 1.5);
+      tp.speedMps = speed;
+      return tp;
+    }
+
+    if (m_pattern.code == "B") {
+      double dist = HighwayShockwaveDistance(local);
+      double x = std::fmod(dist, 10000.0);
+      if (x < 0.0) x += 10000.0;
+      tp.position = Vector(x, yLane, 1.5);
+      tp.speedMps = HighwayShockwaveSpeed(local);
+      tp.turning = (x >= 4300.0 && x <= 5200.0 && std::fabs(yLane) <= 140.0);
+      return tp;
+    }
+
+    double speed = 23.0;
+    std::vector<Vector> route = {
+      Vector(180.0, 220.0, 1.5), Vector(4500.0, 220.0, 1.5),
+      Vector(5200.0, -320.0, 1.5), Vector(4500.0, -220.0, 1.5),
+      Vector(180.0, -220.0, 1.5), Vector(180.0, 220.0, 1.5),
+    };
+    tp.position = SampleAlongPolyline(route, speed * local, true);
+    tp.speedMps = speed;
+    tp.turning = (Dist2d(tp.position, Vector(4500.0, 220.0, 1.5)) < 35.0) ||
+                 (Dist2d(tp.position, Vector(5200.0, -320.0, 1.5)) < 35.0) ||
+                 (Dist2d(tp.position, Vector(4500.0, -220.0, 1.5)) < 35.0);
+    return tp;
+  }
+
+  TrajectoryPoint SampleScenario14(const UeRuntime& ue, double t) const
+  {
+    TrajectoryPoint tp;
+    double local = t + ue.phaseOffsetS;
+
+    if (m_pattern.code == "A") {
+      double speed = 12.0;
+      std::vector<Vector> route = {
+        Vector(120.0, 1100.0, 1.5), Vector(700.0, 1100.0, 1.5),
+        Vector(1100.0, 1100.0, 1.5), Vector(1500.0, 1100.0, 1.5),
+        Vector(2080.0, 1100.0, 1.5), Vector(120.0, 1100.0, 1.5),
+      };
+      tp.position = SampleAlongPolyline(route, speed * local, true);
+      tp.speedMps = speed;
+      tp.turning = (Dist2d(tp.position, Vector(1100.0, 1100.0, 1.5)) < 28.0);
+      return tp;
+    }
+
+    if (m_pattern.code == "B") {
+      std::vector<Vector> waypoints = {
+        Vector(1100.0, 1100.0, 1.5), Vector(1450.0, 1100.0, 1.5),
+        Vector(1820.0, 1100.0, 1.5), Vector(1820.0, 1520.0, 1.5),
+        Vector(1100.0, 1520.0, 1.5), Vector(400.0, 1520.0, 1.5),
+        Vector(400.0, 1100.0, 1.5), Vector(1100.0, 1100.0, 1.5),
+      };
+      TrajectoryPoint out = SampleStopGoWaypoints(waypoints, 2.2, 8.0, t, ue.phaseOffsetS);
+      out.turning = (Dist2d(out.position, Vector(1820.0, 1100.0, 1.5)) < 12.0) ||
+                    (Dist2d(out.position, Vector(1820.0, 1520.0, 1.5)) < 12.0) ||
+                    (Dist2d(out.position, Vector(400.0, 1520.0, 1.5)) < 12.0);
+      return out;
+    }
+
+    double speed = 12.0;
+    std::vector<Vector> route = {
+      Vector(260.0, 900.0, 1.5), Vector(1940.0, 900.0, 1.5),
+      Vector(1940.0, 1300.0, 1.5), Vector(260.0, 1300.0, 1.5),
+      Vector(260.0, 900.0, 1.5),
+    };
+    tp.position = SampleAlongPolyline(route, speed * local, true);
+    tp.speedMps = speed;
+    tp.turning = (Dist2d(tp.position, Vector(260.0, 900.0, 1.5)) < 18.0) ||
+                 (Dist2d(tp.position, Vector(1940.0, 900.0, 1.5)) < 18.0) ||
+                 (Dist2d(tp.position, Vector(1940.0, 1300.0, 1.5)) < 18.0) ||
+                 (Dist2d(tp.position, Vector(260.0, 1300.0, 1.5)) < 18.0);
+    return tp;
+  }
+
+  TrajectoryPoint SampleScenario15(const UeRuntime& ue, double t) const
+  {
+    TrajectoryPoint tp;
+    double local = t + ue.phaseOffsetS;
+
+    if (m_pattern.code == "A") {
+      double speed = 12.0;
+      std::vector<Vector> route = {
+        Vector(260.0, -820.0, 1.5), Vector(1200.0, -500.0, 1.5),
+        Vector(2050.0, -500.0, 1.5), Vector(2850.0, 0.0, 1.5),
+        Vector(2050.0, 500.0, 1.5), Vector(1200.0, 500.0, 1.5),
+        Vector(260.0, 820.0, 1.5), Vector(260.0, -820.0, 1.5),
+      };
+      tp.position = SampleAlongPolyline(route, speed * local, true);
+      tp.speedMps = speed;
+      tp.turning = (Dist2d(tp.position, Vector(2850.0, 0.0, 1.5)) < 30.0);
+      return tp;
+    }
+
+    if (m_pattern.code == "B") {
+      std::vector<Vector> waypoints = {
+        Vector(120.0, -980.0, 1.5), Vector(1200.0, -220.0, 1.5),
+        Vector(2200.0, 220.0, 1.5), Vector(3300.0, 980.0, 1.5),
+        Vector(120.0, -980.0, 1.5),
+      };
+      TrajectoryPoint out = SampleStopGoWaypoints(waypoints, 18.0, 15.0, t, ue.phaseOffsetS);
+      out.turning = (Dist2d(out.position, Vector(1200.0, -220.0, 1.5)) < 15.0) ||
+                    (Dist2d(out.position, Vector(2200.0, 220.0, 1.5)) < 15.0);
+      return out;
+    }
+
+    std::vector<Vector> waypoints = {
+      Vector(800.0, -300.0, 1.5), Vector(1200.0, -300.0, 1.5),
+      Vector(1600.0, -300.0, 1.5), Vector(2000.0, -300.0, 1.5),
+      Vector(2400.0, -300.0, 1.5), Vector(2800.0, -300.0, 1.5),
+      Vector(800.0, -300.0, 1.5),
+    };
+    TrajectoryPoint out = SampleStopGoWaypoints(waypoints, 3.0, 30.0, t, ue.phaseOffsetS);
+    out.turning = (Dist2d(out.position, Vector(1600.0, -300.0, 1.5)) < 10.0) ||
+                  (Dist2d(out.position, Vector(2400.0, -300.0, 1.5)) < 10.0);
+    return out;
+  }
+
   TrajectoryPoint SampleTrajectory(const UeRuntime& ue, double nowS) const
   {
     TrajectoryPoint tp;
@@ -659,6 +1054,21 @@ private:
       break;
     case 10:
       tp = SampleScenario10(ue, nowS);
+      break;
+    case 11:
+      tp = SampleScenario11(ue, nowS);
+      break;
+    case 12:
+      tp = SampleScenario12(ue, nowS);
+      break;
+    case 13:
+      tp = SampleScenario13(ue, nowS);
+      break;
+    case 14:
+      tp = SampleScenario14(ue, nowS);
+      break;
+    case 15:
+      tp = SampleScenario15(ue, nowS);
       break;
     default:
       tp.position = Vector(m_scenario.xMin, m_scenario.yMin, 1.5);
@@ -694,6 +1104,41 @@ private:
     }
     case 10:
       return 0.4;
+    case 11: {
+      bool cbdCore = (tp.position.x >= 520.0 && tp.position.x <= 1080.0 && tp.position.y >= 520.0 && tp.position.y <= 1080.0);
+      bool metroRush = (tp.position.x >= 700.0 && tp.position.x <= 900.0 && now >= 180.0 && now <= 420.0);
+      if (cbdCore && metroRush) return 3.1;
+      if (cbdCore) return 2.1;
+      return 1.5;
+    }
+    case 12: {
+      bool schoolZone = (tp.position.x >= 1320.0 && tp.position.x <= 1680.0 && tp.position.y >= 720.0 && tp.position.y <= 1080.0);
+      bool schoolPeak = (now >= 220.0 && now <= 380.0);
+      if (schoolZone && schoolPeak) return 2.4;
+      if (schoolZone) return 1.6;
+      return 1.0;
+    }
+    case 13: {
+      bool interchange = (tp.position.x >= 4300.0 && tp.position.x <= 5300.0 && std::fabs(tp.position.y) <= 320.0);
+      bool rush = (now >= 150.0 && now <= 320.0);
+      if (interchange && rush) return 1.8;
+      if (interchange) return 1.2;
+      return 0.6;
+    }
+    case 14: {
+      double r = Dist2d(tp.position, Vector(1100.0, 1100.0, 1.5));
+      bool crowd = (now <= 120.0) || (now >= 420.0);
+      if (r <= 420.0 && crowd) return 3.3;
+      if (r <= 420.0) return 2.1;
+      return 1.4;
+    }
+    case 15: {
+      bool yard = (tp.position.x >= 1400.0 && tp.position.x <= 3000.0 && std::fabs(tp.position.y) <= 850.0);
+      bool heavyOps = (now >= 200.0 && now <= 340.0);
+      if (yard && heavyOps) return 2.7;
+      if (yard) return 1.9;
+      return 1.1;
+    }
     default:
       return 0.8;
     }
@@ -701,7 +1146,7 @@ private:
 
   double ComputeLosProbability(const TrajectoryPoint& tp, const Vector& gnbPos) const
   {
-    (void)gnbPos;
+    double dist = Dist2d(tp.position, gnbPos);
     switch (m_scenario.id) {
     case 8: {
       if (tp.turning) return 0.20;
@@ -718,6 +1163,41 @@ private:
     }
     case 10:
       return tp.inTunnel ? 0.05 : 0.98;
+    case 11: {
+      if (tp.turning) return 0.12;
+      bool avenueX = (DistanceToNearestGridLine(tp.position.x - 200.0, 300.0) < 15.0);
+      bool avenueY = (DistanceToNearestGridLine(tp.position.y - 200.0, 300.0) < 15.0);
+      if (avenueX && avenueY) return 0.72;
+      if (avenueX || avenueY) return 0.58;
+      return dist > 1100.0 ? 0.16 : 0.24;
+    }
+    case 12: {
+      bool schoolZone = (tp.position.x >= 1320.0 && tp.position.x <= 1680.0 && tp.position.y >= 720.0 && tp.position.y <= 1080.0);
+      if (tp.turning && schoolZone) return 0.30;
+      if (schoolZone) return 0.45;
+      if (dist > 1800.0) return 0.68;
+      return 0.88;
+    }
+    case 13: {
+      bool interchange = (tp.position.x >= 4300.0 && tp.position.x <= 5300.0 && std::fabs(tp.position.y) <= 320.0);
+      if (interchange && tp.turning) return 0.35;
+      if (interchange) return 0.64;
+      return 0.95;
+    }
+    case 14: {
+      double r = Dist2d(tp.position, Vector(1100.0, 1100.0, 1.5));
+      if (tp.turning && r <= 420.0) return 0.16;
+      if (r <= 420.0) return 0.30;
+      if (r <= 700.0) return 0.52;
+      return 0.78;
+    }
+    case 15: {
+      bool craneCanyon = (tp.position.x >= 1450.0 && tp.position.x <= 2950.0 && std::fabs(tp.position.y) <= 700.0);
+      if (tp.turning && craneCanyon) return 0.14;
+      if (craneCanyon) return 0.26;
+      if (dist > 2200.0) return 0.46;
+      return 0.74;
+    }
     default:
       return 0.5;
     }
@@ -754,6 +1234,63 @@ private:
         if (!isLos) extraLossDb += 2.0;
       }
       break;
+    case 11: {
+      bool cbdCore = (tp.position.x >= 520.0 && tp.position.x <= 1080.0 && tp.position.y >= 520.0 && tp.position.y <= 1080.0);
+      if (isLos) {
+        base = 133.0; slope = 32.0; shadowSigma = 7.0; fadingSigma = 4.0;
+      } else {
+        base = 145.0; slope = 39.0; shadowSigma = 10.0; fadingSigma = 6.0;
+        extraLossDb += 9.0;
+      }
+      if (cbdCore) extraLossDb += 5.0;
+      if (tp.turning) extraLossDb += 4.0;
+      break;
+    }
+    case 12: {
+      bool schoolZone = (tp.position.x >= 1320.0 && tp.position.x <= 1680.0 && tp.position.y >= 720.0 && tp.position.y <= 1080.0);
+      if (isLos) {
+        base = 130.5; slope = 33.0; shadowSigma = 4.5; fadingSigma = 3.0;
+      } else {
+        base = 140.0; slope = 37.0; shadowSigma = 8.0; fadingSigma = 4.5;
+        extraLossDb += 6.0;
+      }
+      if (schoolZone) extraLossDb += 4.0;
+      break;
+    }
+    case 13: {
+      bool interchange = (tp.position.x >= 4300.0 && tp.position.x <= 5300.0 && std::fabs(tp.position.y) <= 320.0);
+      if (isLos) {
+        base = 127.0; slope = 35.0; shadowSigma = 3.0; fadingSigma = 2.0;
+      } else {
+        base = 137.0; slope = 41.0; shadowSigma = 6.0; fadingSigma = 3.5;
+        extraLossDb += 4.0;
+      }
+      if (interchange) extraLossDb += 6.0;
+      break;
+    }
+    case 14: {
+      double r = Dist2d(tp.position, Vector(1100.0, 1100.0, 1.5));
+      if (isLos) {
+        base = 134.0; slope = 33.0; shadowSigma = 6.0; fadingSigma = 3.5;
+      } else {
+        base = 145.0; slope = 39.0; shadowSigma = 10.0; fadingSigma = 5.0;
+        extraLossDb += 10.0;
+      }
+      if (r <= 420.0) extraLossDb += 8.0;
+      if (tp.turning) extraLossDb += 3.0;
+      break;
+    }
+    case 15: {
+      bool craneCanyon = (tp.position.x >= 1450.0 && tp.position.x <= 2950.0 && std::fabs(tp.position.y) <= 700.0);
+      if (isLos) {
+        base = 131.0; slope = 34.5; shadowSigma = 5.0; fadingSigma = 3.0;
+      } else {
+        base = 143.0; slope = 40.0; shadowSigma = 9.0; fadingSigma = 5.0;
+        extraLossDb += 7.0;
+      }
+      if (craneCanyon) extraLossDb += 12.0;
+      break;
+    }
     default:
       base = 140.0; slope = 36.0; shadowSigma = 7.0; fadingSigma = 4.0;
       if (!isLos) extraLossDb += 4.0;
@@ -1068,7 +1605,7 @@ int main(int argc, char* argv[])
 {
   CliOptions cli;
   CommandLine cmd(__FILE__);
-  cmd.AddValue("scenarioId", "Phase-3 scenario ID (8..10)", cli.scenarioId);
+  cmd.AddValue("scenarioId", "Phase-3 scenario ID (8..15)", cli.scenarioId);
   cmd.AddValue("pattern", "Pattern within scenario: A|B|C", cli.pattern);
   cmd.AddValue("duration", "Simulation duration in seconds (0 uses pattern default)", cli.durationS);
   cmd.AddValue("ueCount", "Number of UEs", cli.ueCount);
@@ -1080,7 +1617,7 @@ int main(int argc, char* argv[])
 
   auto catalog = BuildScenarioCatalog();
   auto it = catalog.find(cli.scenarioId);
-  NS_ABORT_MSG_IF(it == catalog.end(), "scenarioId must be one of {8,9,10}");
+  NS_ABORT_MSG_IF(it == catalog.end(), "scenarioId must be one of {8,9,10,11,12,13,14,15}");
 
   ScenarioSpec scenario = it->second;
   PatternSpec pattern = FindPattern(scenario, cli.pattern);

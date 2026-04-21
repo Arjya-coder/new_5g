@@ -43,9 +43,9 @@ LOCAL_OUT_DIR = WORKSPACE_ROOT / "phase_3" / "test_dataset"
 
 
 PRESETS = {
-    # Original full evaluation matrix.
+    # Five realistic real-world scenarios (new default matrix).
     "full": {
-        "scenarioIds": "8,9,10",
+        "scenarioIds": "11,12,13,14,15",
         "patterns": "A,B,C",
         "seedStart": 11,
         "seedEnd": 15,
@@ -53,19 +53,29 @@ PRESETS = {
         "ueCount": 20,
         "duration": 0,
     },
-    # Fast-but-representative matrix:
-    # - scenarios 8/9/10 (ping-pong, non-stationary interference, coverage hole)
+    # Fast-but-representative matrix over the new realistic set:
+    # - urban CBD (11), highway interchange (13), event surge (14)
     # - patterns B/C (dynamic + stop-go variants)
     # - two seeds for basic robustness
-    # - reduced UE count and fixed duration (covers scenario 9 burst + scenario 10 U-turn)
+    # - reduced UE count and fixed duration for faster local validation
     "quick": {
-        "scenarioIds": "8,9,10",
+        "scenarioIds": "11,13,14",
         "patterns": "B,C",
         "seedStart": 11,
         "seedEnd": 12,
         "seeds": "",
         "ueCount": 8,
         "duration": 300,
+    },
+    # Original unseen set kept for backward compatibility.
+    "legacy": {
+        "scenarioIds": "8,9,10",
+        "patterns": "A,B,C",
+        "seedStart": 11,
+        "seedEnd": 15,
+        "seeds": "",
+        "ueCount": 20,
+        "duration": 0,
     },
 }
 
@@ -260,7 +270,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="Delete existing generated outputs in phase_3/test_dataset before regenerating",
     )
 
-    p.add_argument("--scenarioIds", default="8,9,10", help="Comma-separated scenario IDs (default: 8,9,10)")
+    p.add_argument("--scenarioIds", default="11,12,13,14,15", help="Comma-separated scenario IDs (default: 11,12,13,14,15)")
     p.add_argument("--patterns", default="A,B,C", help="Comma-separated patterns (default: A,B,C)")
 
     p.add_argument("--seedStart", type=int, default=11, help="Seed range start (inclusive)")
@@ -311,8 +321,8 @@ def main() -> int:
     explicit_seeds = _parse_int_list(str(args.seeds)) if str(args.seeds).strip() else None
     seeds = _expand_seeds(int(args.seedStart), int(args.seedEnd), explicit_seeds)
 
-    if any(sid not in {8, 9, 10} for sid in scenario_ids):
-        raise ValueError("Phase-3 generator supports scenarioIds {8,9,10}.")
+    if any(sid not in {8, 9, 10, 11, 12, 13, 14, 15} for sid in scenario_ids):
+        raise ValueError("Phase-3 generator supports scenarioIds {8,9,10,11,12,13,14,15}.")
 
     os.makedirs(LOCAL_OUT_DIR, exist_ok=True)
 
