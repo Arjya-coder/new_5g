@@ -97,7 +97,6 @@ def _parse_int_list(csv: str) -> List[int]:
         items.append(int(part))
     return items
 
-
 def _parse_float_list(csv: str) -> List[float]:
     items: List[float] = []
     for part in csv.split(","):
