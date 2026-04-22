@@ -35,7 +35,7 @@ class WslConfig:
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent
-CPP_SOURCE = WORKSPACE_ROOT / "dataset.cpp"
+CPP_SOURCE = WORKSPACE_ROOT / "datasetgen" / "dataset.cpp"
 LOCAL_OUT_DIR = WORKSPACE_ROOT / "dataset"
 
 # -----------------------------------------------------------------------------
@@ -157,7 +157,7 @@ def deploy_cpp_to_ns3_scratch(wsl: WslConfig) -> None:
     bash = (
         "set -euo pipefail; "
         f"cd {wsl.ns3_root}; "
-        f"cp {ws_wsl}/dataset.cpp scratch/md_scenarios.cc"
+        f"cp {ws_wsl}/datasetgen/dataset.cpp scratch/md_scenarios.cc"
     )
 
     result = _run_wsl_bash(wsl, bash)
