@@ -1,0 +1,72 @@
+[
+  {
+    "episode": 1,
+    "total_reward": -3.2152757180818554,
+    "rlf_count": 0,
+    "pp_count": 9,
+    "ho_count": 51
+  },
+  {
+    "episode": 2,
+    "total_reward": -63.03780987143518,
+    "rlf_count": 17,
+    "pp_count": 1,
+    "ho_count": 23
+  },
+  {
+    "episode": 3,
+    "total_reward": -68.73866961932612,
+    "rlf_count": 0,
+    "pp_count": 20,
+    "ho_count": 138
+  },
+  {
+    "episode": 4,
+    "total_reward": -372.4204730766614,
+    "rlf_count": 90,
+    "pp_count": 6,
+    "ho_count": 85
+  },
+  {
+    "episode": 5,
+    "total_reward": 50.21518614065821,
+    "rlf_count": 0,
+    "pp_count": 10,
+    "ho_count": 92
+  },
+  {
+    "episode": 6,
+    "total_reward": 149.4063349407202,
+    "rlf_count": 0,
+    "pp_count": 9,
+    "ho_count": 70
+  },
+  {
+    "episode": 7,
+    "total_reward": 9.41611033392528,
+    "rlf_count": 0,
+    "pp_count": 1,
+    "ho_count": 19
+  },
+  {
+    "episode": 8,
+    "total_reward": 154.60007410883995,
+    "rlf_count": 0,
+    "pp_count": 10,
+    "ho_count": 71
+  },
+  {
+    "episode": 9,
+    "total_reward": 10.31935898450169,
+    "rlf_count": 0,
+    "pp_count": 10,
+    "ho_count": 52
+  },
+  {
+    "episode": 10,
+    "total_reward": 58.48173672270216,
+    "rlf_count": 0,
+    "pp_count": 0,
+    "ho_count": 2
+  }
+]

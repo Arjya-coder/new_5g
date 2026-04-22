@@ -2,7 +2,7 @@
  * ns3_md_scenarios_improved.cc
  *
  * IMPROVED VERSION - 5G Handover Simulation with Enhanced Scenarios
- * 
+ *
  * Key improvements:
  * ✅ Cell-specific LoS probability computation (distance + angle aware)
  * ✅ Position-dependent interference modeling (not global)
@@ -99,10 +99,10 @@ struct ScenarioSpec
   // Improved: Dynamic RLF thresholds (will be set at runtime)
   double rlfThresholdDbm = -122.0;
   double fallbackThresholdDbm = -110.0;
-  
+
   // Scenario-specific jitter scaling (NEW)
   double jitterScaleM = 1.0;
-  
+
   // Base interference scale (will be modulated by position)
   double baseInterferenceScale = 1.0;
 };
@@ -160,7 +160,7 @@ struct UeRuntime
   uint32_t hoCount = 0;
   uint32_t rlfCount = 0;
   uint32_t pingPongCount = 0;
-  
+
   // Shadow fading history for spatial correlation (NEW)
   std::map<uint32_t, std::deque<double>> shadowFadingHistory;
 };
@@ -205,9 +205,11 @@ double Dist3d(const Vector& a, const Vector& b)
 double ComputeAngleToGnb(const Vector& uePos, const Vector& gnbPos)
 {
   Vector delta = gnbPos - uePos;
+  (void)delta;
   double dist2d = Dist2d(uePos, gnbPos);
-  if (dist2d < 1e-6) return 0.0;
-  
+  if (dist2d < 1e-6)
+    return 0.0;
+
   // Angle from horizontal (elevation angle)
   double elevationAngle = std::atan2(gnbPos.z - uePos.z, dist2d) * 180.0 / kPi;
   return elevationAngle;
@@ -217,35 +219,37 @@ double ComputeAngleToGnb(const Vector& uePos, const Vector& gnbPos)
 double WrapRange(double x, double minV, double maxV)
 {
   double span = maxV - minV;
-  if (span <= 0.0) return minV;
+  if (span <= 0.0)
+    return minV;
 
   double shifted = x - minV;
   shifted = std::fmod(shifted, span);
-  if (shifted < 0.0) shifted += span;
+  if (shifted < 0.0)
+    shifted += span;
   return minV + shifted;
 }
 
 // IMPROVEMENT 8: Distance to nearest grid line
 double DistanceToNearestGridLine(double value, double spacing)
 {
-  if (spacing <= 0.0) return std::numeric_limits<double>::max();
+  if (spacing <= 0.0)
+    return std::numeric_limits<double>::max();
   double nearest = std::round(value / spacing) * spacing;
   return std::fabs(value - nearest);
 }
 
 std::string ToUpper(std::string s)
 {
-  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c)
-  { return static_cast<char>(std::toupper(c)); });
+  std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
   return s;
 }
 
 std::string NormalizePatternCode(const std::string& raw)
 {
-  if (raw.empty()) return "A";
+  if (raw.empty())
+    return "A";
   std::string u = ToUpper(raw);
-  if (u.size() >= 2 && std::isdigit(static_cast<unsigned char>(u[0])) && 
-      std::isalpha(static_cast<unsigned char>(u[1])))
+  if (u.size() >= 2 && std::isdigit(static_cast<unsigned char>(u[0])) && std::isalpha(static_cast<unsigned char>(u[1])))
     return std::string(1, u[1]);
   if (std::isalpha(static_cast<unsigned char>(u[0])))
     return std::string(1, u[0]);
@@ -256,16 +260,16 @@ std::string NormalizePatternCode(const std::string& raw)
 Vector Lerp(const Vector& a, const Vector& b, double t)
 {
   t = Clamp(t, 0.0, 1.0);
-  return Vector(a.x + (b.x - a.x) * t,
-                a.y + (b.y - a.y) * t,
-                a.z + (b.z - a.z) * t);
+  return Vector(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 }
 
 // IMPROVEMENT 10: Polyline sampling
 Vector SampleAlongPolyline(const std::vector<Vector>& points, double distance, bool loop)
 {
-  if (points.empty()) return Vector(0.0, 0.0, 1.5);
-  if (points.size() == 1) return points.front();
+  if (points.empty())
+    return Vector(0.0, 0.0, 1.5);
+  if (points.size() == 1)
+    return points.front();
 
   double total = 0.0;
   std::vector<double> lengths;
@@ -277,12 +281,14 @@ Vector SampleAlongPolyline(const std::vector<Vector>& points, double distance, b
     total += seg;
   }
 
-  if (total < 1e-6) return points.front();
+  if (total < 1e-6)
+    return points.front();
 
   if (loop)
   {
     distance = std::fmod(distance, total);
-    if (distance < 0.0) distance += total;
+    if (distance < 0.0)
+      distance += total;
   }
   else
   {
@@ -304,14 +310,17 @@ Vector SampleAlongPolyline(const std::vector<Vector>& points, double distance, b
 
 // IMPROVEMENT 11: Stop-go waypoint sampling
 TrajectoryPoint SampleStopGoWaypoints(const std::vector<Vector>& waypoints,
-                                      double speedMps, double pauseS, double t,
-                                      double phaseOffsetS)
+                                     double speedMps,
+                                     double pauseS,
+                                     double t,
+                                     double phaseOffsetS)
 {
   TrajectoryPoint out;
   out.position = waypoints.empty() ? Vector(0.0, 0.0, 1.5) : waypoints.front();
   out.speedMps = 0.0;
 
-  if (waypoints.size() < 2) return out;
+  if (waypoints.size() < 2)
+    return out;
 
   double cycle = 0.0;
   std::vector<double> moveTimes;
@@ -324,10 +333,12 @@ TrajectoryPoint SampleStopGoWaypoints(const std::vector<Vector>& waypoints,
     cycle += move + pauseS;
   }
 
-  if (cycle <= 1e-6) return out;
+  if (cycle <= 1e-6)
+    return out;
 
   double local = std::fmod(t + phaseOffsetS, cycle);
-  if (local < 0.0) local += cycle;
+  if (local < 0.0)
+    local += cycle;
 
   for (size_t i = 0; i < moveTimes.size(); ++i)
   {
@@ -386,7 +397,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     s.yMax = 1000.0;
     s.rlfThresholdDbm = -122.0;
     s.fallbackThresholdDbm = -108.0;
-    s.jitterScaleM = 1.0;      // Urban grid: ±15m reasonable
+    s.jitterScaleM = 1.0; // Urban grid: ±15m reasonable
     s.baseInterferenceScale = 1.0;
 
     AddGnb(s.gnbs, 0.0, 0.0, 25.0, 36.0);
@@ -416,7 +427,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     s.yMax = 2000.0;
     s.rlfThresholdDbm = -121.0;
     s.fallbackThresholdDbm = -108.0;
-    s.jitterScaleM = 0.5;      // Narrow canyon: ±2-3m only
+    s.jitterScaleM = 0.5; // Narrow canyon: ±2-3m only
     s.baseInterferenceScale = 0.8;
 
     AddGnb(s.gnbs, 0.0, 0.0, 20.0, 36.0);
@@ -428,9 +439,9 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     AddGnb(s.gnbs, 40.0, 1250.0, 20.0, 36.0);
     AddGnb(s.gnbs, 40.0, 1750.0, 20.0, 36.0);
 
-    s.patterns.push_back({"A", "Straight Walk Down Canyon", 600.0});  // Changed from 1333
+    s.patterns.push_back({"A", "Straight Walk Down Canyon", 600.0}); // Changed from 1333
     s.patterns.push_back({"B", "Fast Walk With Perpendicular Turn", 600.0});
-    s.patterns.push_back({"C", "Car Moving Fast", 600.0});            // Changed from 100
+    s.patterns.push_back({"C", "Car Moving Fast", 600.0}); // Changed from 100
 
     out[s.id] = s;
   }
@@ -445,7 +456,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     s.yMax = 2000.0;
     s.rlfThresholdDbm = -124.0;
     s.fallbackThresholdDbm = -112.0;
-    s.jitterScaleM = 0.8;      // Suburban: ±8-10m
+    s.jitterScaleM = 0.8; // Suburban: ±8-10m
     s.baseInterferenceScale = 0.5;
 
     AddGnb(s.gnbs, 200.0, 200.0, 22.0, 36.0);
@@ -479,7 +490,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     s.yMax = 450.0;
     s.rlfThresholdDbm = -122.0;
     s.fallbackThresholdDbm = -110.0;
-    s.jitterScaleM = 0.7;      // Intersection: ±5m
+    s.jitterScaleM = 0.7; // Intersection: ±5m
     s.baseInterferenceScale = 1.0;
 
     AddGnb(s.gnbs, 125.0, 400.0, 20.0, 36.0);
@@ -489,7 +500,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     AddGnb(s.gnbs, 200.0, 350.0, 20.0, 36.0);
     AddGnb(s.gnbs, -50.0, -100.0, 20.0, 36.0);
 
-    s.patterns.push_back({"A", "Pedestrian Crossing", 600.0});        // Changed from 233
+    s.patterns.push_back({"A", "Pedestrian Crossing", 600.0}); // Changed from 233
     s.patterns.push_back({"B", "Vehicle Turning", 600.0});
     s.patterns.push_back({"C", "Traffic Light Cycles", 600.0});
 
@@ -506,7 +517,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     s.yMax = 200.0;
     s.rlfThresholdDbm = -125.0;
     s.fallbackThresholdDbm = -113.0;
-    s.jitterScaleM = 0.6;      // Corridor: ±3-5m
+    s.jitterScaleM = 0.6; // Corridor: ±3-5m
     s.baseInterferenceScale = 0.4;
 
     AddGnb(s.gnbs, 0.0, 0.0, 25.0, 43.0);
@@ -534,7 +545,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     s.yMax = 2000.0;
     s.rlfThresholdDbm = -123.0;
     s.fallbackThresholdDbm = -110.0;
-    s.jitterScaleM = 0.9;      // Mixed: ±10m
+    s.jitterScaleM = 0.9; // Mixed: ±10m
     s.baseInterferenceScale = 0.75;
 
     // Dense zone 9 gNBs (300m spacing).
@@ -547,7 +558,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     }
 
     // Transition zone 6 gNBs with smoother power gradient (NEW).
-    AddGnb(s.gnbs, 750.0, 150.0, 22.0, 35.0);  // -1dB
+    AddGnb(s.gnbs, 750.0, 150.0, 22.0, 35.0); // -1dB
     AddGnb(s.gnbs, 750.0, 450.0, 22.0, 35.0);
     AddGnb(s.gnbs, 750.0, 750.0, 22.0, 35.0);
     AddGnb(s.gnbs, 1100.0, 150.0, 22.0, 35.0);
@@ -555,7 +566,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     AddGnb(s.gnbs, 1100.0, 750.0, 22.0, 35.0);
 
     // Suburban zone 6 gNBs with lower power.
-    AddGnb(s.gnbs, 1400.0, 200.0, 25.0, 34.0);  // -2dB
+    AddGnb(s.gnbs, 1400.0, 200.0, 25.0, 34.0); // -2dB
     AddGnb(s.gnbs, 2000.0, 200.0, 25.0, 34.0);
     AddGnb(s.gnbs, 1400.0, 700.0, 25.0, 34.0);
     AddGnb(s.gnbs, 2000.0, 700.0, 25.0, 34.0);
@@ -579,7 +590,7 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     s.yMax = 250.0;
     s.rlfThresholdDbm = -118.0;
     s.fallbackThresholdDbm = -108.0;
-    s.jitterScaleM = 0.4;      // Tunnel: ±2m only
+    s.jitterScaleM = 0.4; // Tunnel: ±2m only
     s.baseInterferenceScale = 0.7;
 
     AddGnb(s.gnbs, 200.0, 200.0, 25.0, 36.0);
@@ -589,8 +600,8 @@ std::map<uint32_t, ScenarioSpec> BuildScenarioCatalog()
     AddGnb(s.gnbs, 100.0, 0.0, 20.0, 36.0);
     AddGnb(s.gnbs, 900.0, 0.0, 20.0, 36.0);
 
-    s.patterns.push_back({"A", "Walk Through Tunnel", 600.0});        // Changed from 667
-    s.patterns.push_back({"B", "Car Through Tunnel", 600.0});         // Changed from 33
+    s.patterns.push_back({"A", "Walk Through Tunnel", 600.0}); // Changed from 667
+    s.patterns.push_back({"B", "Car Through Tunnel", 600.0});  // Changed from 33
     s.patterns.push_back({"C", "In And Out Oscillating", 600.0});
 
     out[s.id] = s;
@@ -671,7 +682,7 @@ private:
       ue.id = i;
       ue.node = m_ueNodes.Get(i);
       ue.phaseOffsetS = m_uni->GetValue(0.0, 20.0);
-      
+
       // IMPROVEMENT: Scenario-specific jitter scaling
       double jitterScale = m_scenario.jitterScaleM;
       ue.lateralOffsetM = m_uni->GetValue(-3.0 * jitterScale, 3.0 * jitterScale);
@@ -690,7 +701,8 @@ private:
   void AddBuilding(double x1, double x2, double y1, double y2, double h)
   {
     Ptr<Building> b = CreateObject<Building>();
-    b->SetBoundaries(Box(std::min(x1, x2), std::max(x1, x2), std::min(y1, y2), std::max(y1, y2), 0.0, h));
+    b->SetBoundaries(
+        Box(std::min(x1, x2), std::max(x1, x2), std::min(y1, y2), std::max(y1, y2), 0.0, h));
     b->SetBuildingType(Building::Office);
     b->SetExtWallsType(Building::ConcreteWithWindows);
     b->SetNFloors(std::max<uint16_t>(1, static_cast<uint16_t>(h / 3.0)));
@@ -794,12 +806,13 @@ private:
     if (p == "A")
     {
       double speed = 1.5;
-      std::vector<Vector> route = {
-        Vector(120.0, 120.0, 1.5),  Vector(120.0, 880.0, 1.5),
-        Vector(500.0, 880.0, 1.5),  Vector(500.0, 120.0, 1.5),
-        Vector(880.0, 120.0, 1.5),  Vector(880.0, 880.0, 1.5),
-        Vector(120.0, 880.0, 1.5)
-      };
+      std::vector<Vector> route = {Vector(120.0, 120.0, 1.5),
+                                   Vector(120.0, 880.0, 1.5),
+                                   Vector(500.0, 880.0, 1.5),
+                                   Vector(500.0, 120.0, 1.5),
+                                   Vector(880.0, 120.0, 1.5),
+                                   Vector(880.0, 880.0, 1.5),
+                                   Vector(120.0, 880.0, 1.5)};
       double distance = speed * (t + ue.phaseOffsetS);
       TrajectoryPoint tp;
       tp.position = SampleAlongPolyline(route, distance, true);
@@ -809,21 +822,23 @@ private:
 
     if (p == "B")
     {
-      std::vector<Vector> waypoints = {
-        Vector(140.0, 120.0, 1.5),   Vector(140.0, 760.0, 1.5),
-        Vector(420.0, 760.0, 1.5),   Vector(420.0, 260.0, 1.5),
-        Vector(760.0, 260.0, 1.5),   Vector(760.0, 860.0, 1.5),
-        Vector(220.0, 860.0, 1.5),   Vector(140.0, 120.0, 1.5)
-      };
+      std::vector<Vector> waypoints = {Vector(140.0, 120.0, 1.5),
+                                       Vector(140.0, 760.0, 1.5),
+                                       Vector(420.0, 760.0, 1.5),
+                                       Vector(420.0, 260.0, 1.5),
+                                       Vector(760.0, 260.0, 1.5),
+                                       Vector(760.0, 860.0, 1.5),
+                                       Vector(220.0, 860.0, 1.5),
+                                       Vector(140.0, 120.0, 1.5)};
       return SampleStopGoWaypoints(waypoints, 2.0, 3.0, t, ue.phaseOffsetS);
     }
 
     double speed = 15.0;
-    std::vector<Vector> route = {
-      Vector(60.0, 170.0, 1.5),    Vector(940.0, 170.0, 1.5),
-      Vector(940.0, 840.0, 1.5),   Vector(60.0, 840.0, 1.5),
-      Vector(60.0, 170.0, 1.5)
-    };
+    std::vector<Vector> route = {Vector(60.0, 170.0, 1.5),
+                                 Vector(940.0, 170.0, 1.5),
+                                 Vector(940.0, 840.0, 1.5),
+                                 Vector(60.0, 840.0, 1.5),
+                                 Vector(60.0, 170.0, 1.5)};
     double distance = speed * (t + ue.phaseOffsetS);
     TrajectoryPoint tp;
     tp.position = SampleAlongPolyline(route, distance, true);
@@ -840,7 +855,8 @@ private:
     {
       double speed = 1.5;
       double y = std::fmod(speed * local, 2000.0);
-      if (y < 0.0) y += 2000.0;
+      if (y < 0.0)
+        y += 2000.0;
       tp.position = Vector(20.0 + ue.lateralOffsetM, y, 1.5);
       tp.speedMps = speed;
       return tp;
@@ -850,7 +866,8 @@ private:
     {
       double cycle = 90.0;
       double phase = std::fmod(local, cycle);
-      if (phase < 0.0) phase += cycle;
+      if (phase < 0.0)
+        phase += cycle;
       uint32_t lap = static_cast<uint32_t>(std::floor(local / cycle));
       double yBase = std::fmod(lap * 200.0, 2000.0);
 
@@ -878,7 +895,8 @@ private:
 
     double speed = 20.0;
     double y = std::fmod(speed * local, 2000.0);
-    if (y < 0.0) y += 2000.0;
+    if (y < 0.0)
+      y += 2000.0;
     tp.position = Vector(20.0 + ue.lateralOffsetM, y, 1.5);
     tp.speedMps = speed;
     return tp;
@@ -891,13 +909,15 @@ private:
 
     if (m_pattern.code == "A")
     {
-      std::vector<Vector> route = {
-        Vector(200.0, 200.0, 1.5),   Vector(1800.0, 200.0, 1.5),
-        Vector(1800.0, 700.0, 1.5),  Vector(200.0, 700.0, 1.5),
-        Vector(200.0, 1300.0, 1.5),  Vector(1800.0, 1300.0, 1.5),
-        Vector(1800.0, 1800.0, 1.5), Vector(300.0, 1800.0, 1.5),
-        Vector(200.0, 200.0, 1.5)
-      };
+      std::vector<Vector> route = {Vector(200.0, 200.0, 1.5),
+                                   Vector(1800.0, 200.0, 1.5),
+                                   Vector(1800.0, 700.0, 1.5),
+                                   Vector(200.0, 700.0, 1.5),
+                                   Vector(200.0, 1300.0, 1.5),
+                                   Vector(1800.0, 1300.0, 1.5),
+                                   Vector(1800.0, 1800.0, 1.5),
+                                   Vector(300.0, 1800.0, 1.5),
+                                   Vector(200.0, 200.0, 1.5)};
       double speed = 1.5;
       tp.position = SampleAlongPolyline(route, speed * local, true);
       tp.speedMps = speed;
@@ -914,11 +934,11 @@ private:
       return tp;
     }
 
-    std::vector<Vector> route = {
-      Vector(100.0, 650.0, 1.5),   Vector(1900.0, 650.0, 1.5),
-      Vector(1900.0, 900.0, 1.5),  Vector(100.0, 900.0, 1.5),
-      Vector(100.0, 650.0, 1.5)
-    };
+    std::vector<Vector> route = {Vector(100.0, 650.0, 1.5),
+                                 Vector(1900.0, 650.0, 1.5),
+                                 Vector(1900.0, 900.0, 1.5),
+                                 Vector(100.0, 900.0, 1.5),
+                                 Vector(100.0, 650.0, 1.5)};
     double distance = 25.0 * local + 100.0 * std::sin(0.05 * local);
     tp.position = SampleAlongPolyline(route, distance, true);
     tp.speedMps = Clamp(25.0 + 5.0 * std::cos(0.05 * local), 20.0, 30.0);
@@ -937,7 +957,8 @@ private:
       Vector b(250.0, 0.0, 1.5);
       double length = Dist2d(a, b);
       double d = std::fmod(speed * local, length);
-      if (d < 0.0) d += length;
+      if (d < 0.0)
+        d += length;
       tp.position = Lerp(a, b, d / length);
       tp.speedMps = speed;
       return tp;
@@ -945,21 +966,21 @@ private:
 
     if (m_pattern.code == "B")
     {
-      std::vector<Vector> route = {
-        Vector(125.0, -150.0, 1.5), Vector(125.0, 125.0, 1.5),
-        Vector(400.0, 125.0, 1.5),  Vector(125.0, 125.0, 1.5),
-        Vector(125.0, -150.0, 1.5)
-      };
+      std::vector<Vector> route = {Vector(125.0, -150.0, 1.5),
+                                   Vector(125.0, 125.0, 1.5),
+                                   Vector(400.0, 125.0, 1.5),
+                                   Vector(125.0, 125.0, 1.5),
+                                   Vector(125.0, -150.0, 1.5)};
       double speed = 15.0;
       tp.position = SampleAlongPolyline(route, speed * local, true);
       tp.speedMps = speed;
       return tp;
     }
 
-    std::vector<Vector> route = {
-      Vector(125.0, -120.0, 1.5), Vector(125.0, 125.0, 1.5),
-      Vector(380.0, 125.0, 1.5),  Vector(125.0, -120.0, 1.5)
-    };
+    std::vector<Vector> route = {Vector(125.0, -120.0, 1.5),
+                                 Vector(125.0, 125.0, 1.5),
+                                 Vector(380.0, 125.0, 1.5),
+                                 Vector(125.0, -120.0, 1.5)};
     TrajectoryPoint stopGo = SampleStopGoWaypoints(route, 10.0, 40.0, t, ue.phaseOffsetS);
     return stopGo;
   }
@@ -968,7 +989,8 @@ private:
   {
     double cycle = 40.0;
     double phase = std::fmod(t, cycle);
-    if (phase < 0.0) phase += cycle;
+    if (phase < 0.0)
+      phase += cycle;
     uint64_t laps = static_cast<uint64_t>(std::floor(t / cycle));
     double base = static_cast<double>(laps) * 1100.0;
     if (phase < 10.0)
@@ -982,7 +1004,8 @@ private:
   double HighwaySpeedPatternB(double t) const
   {
     double phase = std::fmod(t, 40.0);
-    if (phase < 0.0) phase += 40.0;
+    if (phase < 0.0)
+      phase += 40.0;
     if (phase < 10.0)
       return 5.0 + 3.0 * phase;
     if (phase < 30.0)
@@ -994,7 +1017,8 @@ private:
   {
     double cycle = 120.0;
     double phase = std::fmod(t, cycle);
-    if (phase < 0.0) phase += cycle;
+    if (phase < 0.0)
+      phase += cycle;
     uint64_t laps = static_cast<uint64_t>(std::floor(t / cycle));
     double base = static_cast<double>(laps) * 3000.0;
     if (phase < 40.0)
@@ -1007,7 +1031,8 @@ private:
   double HighwaySpeedPatternC(double t) const
   {
     double phase = std::fmod(t, 120.0);
-    if (phase < 0.0) phase += 120.0;
+    if (phase < 0.0)
+      phase += 120.0;
     if (phase < 40.0)
       return 20.0;
     if (phase < 60.0)
@@ -1024,7 +1049,8 @@ private:
     {
       double speed = 30.0;
       double x = std::fmod(speed * local, 5000.0);
-      if (x < 0.0) x += 5000.0;
+      if (x < 0.0)
+        x += 5000.0;
       tp.position = Vector(x, ue.lateralOffsetM, 1.5);
       tp.speedMps = speed;
       return tp;
@@ -1034,7 +1060,8 @@ private:
     {
       double distance = HighwayDistancePatternB(local);
       double x = std::fmod(distance, 5000.0);
-      if (x < 0.0) x += 5000.0;
+      if (x < 0.0)
+        x += 5000.0;
       tp.position = Vector(x, ue.lateralOffsetM, 1.5);
       tp.speedMps = HighwaySpeedPatternB(local);
       return tp;
@@ -1042,7 +1069,8 @@ private:
 
     double distance = HighwayDistancePatternC(local);
     double x = std::fmod(distance, 5000.0);
-    if (x < 0.0) x += 5000.0;
+    if (x < 0.0)
+      x += 5000.0;
     tp.position = Vector(x, ue.lateralOffsetM, 1.5);
     tp.speedMps = HighwaySpeedPatternC(local);
     return tp;
@@ -1056,11 +1084,11 @@ private:
     if (m_pattern.code == "A")
     {
       double phase = std::fmod(local, 1200.0);
-      if (phase < 0.0) phase += 1200.0;
+      if (phase < 0.0)
+        phase += 1200.0;
 
-      Vector p0(2200.0, 1000.0, 1.5), p1(1500.0, 900.0, 1.5),
-             p2(900.0, 700.0, 1.5),   p3(350.0, 350.0, 1.5),
-             p4(900.0, 650.0, 1.5),   p5(2200.0, 1000.0, 1.5);
+      Vector p0(2200.0, 1000.0, 1.5), p1(1500.0, 900.0, 1.5), p2(900.0, 700.0, 1.5),
+          p3(350.0, 350.0, 1.5), p4(900.0, 650.0, 1.5), p5(2200.0, 1000.0, 1.5);
 
       if (phase < 200.0)
       {
@@ -1102,12 +1130,12 @@ private:
 
     double cycle = 720.0;
     double phase = std::fmod(local, cycle);
-    if (phase < 0.0) phase += cycle;
+    if (phase < 0.0)
+      phase += cycle;
 
     if (phase < 120.0)
     {
-      tp.position = Vector(1700.0 + 70.0 * std::sin(0.03 * phase),
-                           950.0 + 30.0 * std::cos(0.03 * phase), 1.5);
+      tp.position = Vector(1700.0 + 70.0 * std::sin(0.03 * phase), 950.0 + 30.0 * std::cos(0.03 * phase), 1.5);
       tp.speedMps = 1.5;
       return tp;
     }
@@ -1123,8 +1151,7 @@ private:
     if (phase < 480.0)
     {
       double p = phase - 360.0;
-      tp.position = Vector(350.0 + 60.0 * std::sin(0.05 * p),
-                           380.0 + 60.0 * std::cos(0.05 * p), 1.5);
+      tp.position = Vector(350.0 + 60.0 * std::sin(0.05 * p), 380.0 + 60.0 * std::cos(0.05 * p), 1.5);
       tp.speedMps = 2.0;
       return tp;
     }
@@ -1144,7 +1171,8 @@ private:
     {
       double speed = 1.5;
       double x = std::fmod(speed * local, 1000.0);
-      if (x < 0.0) x += 1000.0;
+      if (x < 0.0)
+        x += 1000.0;
       tp.position = Vector(x, ue.lateralOffsetM, 1.5);
       tp.speedMps = speed;
       tp.inTunnel = (x >= 0.0 && x <= 1000.0 && std::fabs(tp.position.y) <= 10.0);
@@ -1155,7 +1183,8 @@ private:
     {
       double speed = 30.0;
       double x = std::fmod(speed * local, 1000.0);
-      if (x < 0.0) x += 1000.0;
+      if (x < 0.0)
+        x += 1000.0;
       tp.position = Vector(x, ue.lateralOffsetM, 1.5);
       tp.speedMps = speed;
       tp.inTunnel = (x >= 0.0 && x <= 1000.0 && std::fabs(tp.position.y) <= 10.0);
@@ -1164,7 +1193,8 @@ private:
 
     double cycle = 280.0;
     double phase = std::fmod(local, cycle);
-    if (phase < 0.0) phase += cycle;
+    if (phase < 0.0)
+      phase += cycle;
 
     if (phase < 100.0)
     {
@@ -1240,6 +1270,8 @@ private:
   // IMPROVEMENT 13: Cell-specific LoS probability (ENHANCED)
   double ComputeLosProbability(const TrajectoryPoint& tp, const Vector& gnbPos) const
   {
+    (void)ComputeAngleToGnb; // keep compiled even if unused in current model
+
     switch (m_scenario.id)
     {
     case 1:
@@ -1247,50 +1279,50 @@ private:
       bool onStreetX = (DistanceToNearestGridLine(tp.position.x, 100.0) < 8.0);
       bool onStreetY = (DistanceToNearestGridLine(tp.position.y, 100.0) < 8.0);
       if (onStreetX && onStreetY)
-        return 0.70;  // Intersection
+        return 0.70; // Intersection
       if (onStreetX || onStreetY)
-        return 0.85;  // Street
-      return 0.15;    // Urban canyon (increased from 0.10)
+        return 0.85; // Street
+      return 0.15; // Urban canyon (increased from 0.10)
     }
 
     case 2:
     {
       double dist2d = Dist2d(tp.position, gnbPos);
       if (tp.turning)
-        return 0.20;  // Turning: more blockage
+        return 0.20; // Turning: more blockage
       if (std::fabs(tp.position.x - 20.0) < 12.0)
-        return 0.92;  // Aligned with street
+        return 0.92; // Aligned with street
       // Distance-dependent LoS in canyon
       if (dist2d > 500.0)
-        return 0.12;  // Far side: blocked
-      return 0.20;    // Intermediate
+        return 0.12; // Far side: blocked
+      return 0.20; // Intermediate
     }
 
     case 3:
     {
       double dist2d = Dist2d(tp.position, gnbPos);
       if (dist2d < 300.0)
-        return 0.85;  // Close = mostly LoS in suburban
-      return 0.55;    // Far = mixed
+        return 0.85; // Close = mostly LoS in suburban
+      return 0.55; // Far = mixed
     }
 
     case 4:
     {
       double dCenter = Dist2d(tp.position, Vector(125.0, 125.0, 0.0));
-      return (dCenter < 90.0) ? 1.0 : 0.70;  // Intersection specific
+      return (dCenter < 90.0) ? 1.0 : 0.70; // Intersection specific
     }
 
     case 5:
-      return 0.98;  // Highway: mostly LoS
+      return 0.98; // Highway: mostly LoS
 
     case 6:
     {
       // Zone-dependent LoS
       if (tp.position.x < 700.0)
-        return 0.75;  // Dense
+        return 0.75; // Dense
       if (tp.position.x < 1300.0)
-        return 0.85;  // Transition
-      return 0.92;    // Suburban
+        return 0.85; // Transition
+      return 0.92; // Suburban
     }
 
     case 7:
@@ -1298,12 +1330,12 @@ private:
       {
         double depth = std::min(tp.position.x, 1000.0 - tp.position.x);
         if (depth < 50.0)
-          return 0.20;    // Tunnel entrance
+          return 0.20; // Tunnel entrance
         if (depth < 500.0)
-          return 0.03;    // Deep tunnel
-        return 0.25;      // Tunnel exit
+          return 0.03; // Deep tunnel
+        return 0.25; // Tunnel exit
       }
-      return 0.45;        // Outside tunnel
+      return 0.45; // Outside tunnel
 
     default:
       return 0.5;
@@ -1315,17 +1347,17 @@ private:
   {
     double distToServing = Dist2d(tp.position, servingPos);
     double distToInterfer = Dist2d(tp.position, interferPos);
-    
+
     // Closer to serving = less interference contribution
     double baseScale = m_scenario.baseInterferenceScale;
-    
+
     // Distance ratio: if far from serving and close to interferer, more interference
     if (distToServing > 100.0)
     {
       double ratio = distToInterfer / std::max(distToServing, 10.0);
       return baseScale * Clamp(ratio, 0.1, 1.5);
     }
-    
+
     return baseScale * 0.7; // Close to serving: less interference
   }
 
@@ -1333,7 +1365,7 @@ private:
   double ApplyShadowFadingCorrelation(UeRuntime& ue, uint32_t cellId, double newShadow)
   {
     auto& history = ue.shadowFadingHistory[cellId];
-    
+
     if (history.empty())
     {
       history.push_back(newShadow);
@@ -1341,19 +1373,23 @@ private:
     }
 
     // Simple exponential averaging for correlation
-    double alpha = 0.3;  // Correlation factor
+    double alpha = 0.3; // Correlation factor
     double correlatedShadow = alpha * newShadow + (1.0 - alpha) * history.back();
-    
+
     history.push_back(correlatedShadow);
     if (history.size() > kShadowFadingHistorySize)
       history.pop_front();
-    
+
     return correlatedShadow;
   }
 
-  void ResolvePathLossModel(const TrajectoryPoint& tp, bool isLos,
-                             double& base, double& slope, double& shadowSigma,
-                             double& fadingSigma, double& extraLossDb) const
+  void ResolvePathLossModel(const TrajectoryPoint& tp,
+                            bool isLos,
+                            double& base,
+                            double& slope,
+                            double& shadowSigma,
+                            double& fadingSigma,
+                            double& extraLossDb) const
   {
     extraLossDb = 0.0;
 
@@ -1365,7 +1401,7 @@ private:
       shadowSigma = 8.0;
       fadingSigma = 4.0;
       if (!isLos)
-        extraLossDb += 5.0;  // Urban NLoS
+        extraLossDb += 5.0; // Urban NLoS
       break;
 
     case 2:
@@ -1473,7 +1509,7 @@ private:
     }
   }
 
-  std::vector<CellMeasurement> MeasureCells(const TrajectoryPoint& tp)
+  std::vector<CellMeasurement> MeasureCells(UeRuntime& ue, const TrajectoryPoint& tp)
   {
     std::vector<CellMeasurement> out;
     out.reserve(m_scenario.gnbs.size());
@@ -1491,7 +1527,10 @@ private:
       ResolvePathLossModel(tp, isLos, base, slope, sigmaShadow, sigmaFading, extraLoss);
 
       double pathLossDb = base + slope * std::log10(dKm) + extraLoss;
+
       double shadowDb = m_norm->GetValue() * sigmaShadow;
+      shadowDb = ApplyShadowFadingCorrelation(ue, g.id, shadowDb);
+
       double fadingDb = m_norm->GetValue() * sigmaFading;
 
       CellMeasurement m;
@@ -1510,22 +1549,20 @@ private:
     {
       double signalMw = DbmToMilliwatt(out[i].rsrpDbm);
       double interfMw = 0.0;
-      
+
       for (size_t j = 0; j < out.size(); ++j)
       {
-        if (i == j) continue;
-        
-        // Position-dependent interference scaling
+        if (i == j)
+          continue;
+
         double scaleij = ComputeInterferenceScale(tp, m_scenario.gnbs[i].position, m_scenario.gnbs[j].position);
         interfMw += scaleij * DbmToMilliwatt(out[j].rsrpDbm);
       }
-      
+
       out[i].sinrDb = MilliwattToDbm(signalMw / (noiseMw + interfMw));
     }
 
-    std::sort(out.begin(), out.end(), [](const CellMeasurement& a, const CellMeasurement& b)
-    { return a.rsrpDbm > b.rsrpDbm; });
-
+    std::sort(out.begin(), out.end(), [](const CellMeasurement& a, const CellMeasurement& b) { return a.rsrpDbm > b.rsrpDbm; });
     return out;
   }
 
@@ -1552,21 +1589,27 @@ private:
     return 0;
   }
 
-  void WriteEvent(double now, const UeRuntime& ue, const std::string& eventType,
-                  uint32_t fromCell, uint32_t toCell, double servingRsrp,
-                  double targetRsrp, double margin, const std::string& reason)
+  void WriteEvent(double now,
+                  const UeRuntime& ue,
+                  const std::string& eventType,
+                  uint32_t fromCell,
+                  uint32_t toCell,
+                  double servingRsrp,
+                  double targetRsrp,
+                  double margin,
+                  const std::string& reason)
   {
-    m_eventCsv << std::fixed << std::setprecision(3)
-               << now << "," << m_scenario.id << "," << m_pattern.code << ","
-               << ue.id << "," << eventType << "," << fromCell << "," << toCell << ","
-               << servingRsrp << "," << targetRsrp << "," << margin << "," << reason << "\n";
+    m_eventCsv << std::fixed << std::setprecision(3) << now << "," << m_scenario.id << "," << m_pattern.code << "," << ue.id
+               << "," << eventType << "," << fromCell << "," << toCell << "," << servingRsrp << "," << targetRsrp << ","
+               << margin << "," << reason << "\n";
   }
 
-  TickDecision ProcessHandover(UeRuntime& ue, double now,
-                                const std::vector<CellMeasurement>& meas,
-                                const CellMeasurement& serving,
-                                uint32_t bestNeighborCell,
-                                double bestNeighborRsrp)
+  TickDecision ProcessHandover(UeRuntime& ue,
+                               double now,
+                               const std::vector<CellMeasurement>& meas,
+                               const CellMeasurement& serving,
+                               uint32_t bestNeighborCell,
+                               double bestNeighborRsrp)
   {
     TickDecision decision;
     decision.fromCell = ue.servingCell;
@@ -1637,8 +1680,8 @@ private:
         decision.toCell = target->cellId;
         decision.reason = "A3_TTT";
 
-        WriteEvent(now, ue, "HO", ue.servingCell, target->cellId, serving.rsrpDbm,
-                   target->rsrpDbm, target->rsrpDbm - serving.rsrpDbm, "A3_TTT");
+        WriteEvent(now, ue, "HO", ue.servingCell, target->cellId, serving.rsrpDbm, target->rsrpDbm,
+                   target->rsrpDbm - serving.rsrpDbm, "A3_TTT");
 
         CheckPingPong(now, ue, ue.servingCell, target->cellId, decision);
         ue.servingCell = target->cellId;
@@ -1655,8 +1698,7 @@ private:
 
   void CheckPingPong(double now, UeRuntime& ue, uint32_t fromCell, uint32_t toCell, TickDecision& decision)
   {
-    if (ue.lastHoFromCell == static_cast<int32_t>(toCell) &&
-        ue.lastHoToCell == static_cast<int32_t>(fromCell) &&
+    if (ue.lastHoFromCell == static_cast<int32_t>(toCell) && ue.lastHoToCell == static_cast<int32_t>(fromCell) &&
         (now - ue.lastHoTimeS) <= kPingPongWindowS)
     {
       decision.pingPongEvent = true;
@@ -1669,37 +1711,53 @@ private:
     ue.lastHoTimeS = now;
   }
 
-  void LogTick(double now, const UeRuntime& ue, const TrajectoryPoint& tp,
-               const std::vector<CellMeasurement>& meas, const CellMeasurement& serving,
-               uint32_t bestNeighborCell, double bestNeighborRsrp, const TickDecision& decision)
+  void LogTick(double now,
+               const UeRuntime& ue,
+               const TrajectoryPoint& tp,
+               const std::vector<CellMeasurement>& meas,
+               const CellMeasurement& serving,
+               uint32_t bestNeighborCell,
+               double bestNeighborRsrp,
+               const TickDecision& decision)
   {
     double margin = (bestNeighborCell != 0) ? (bestNeighborRsrp - serving.rsrpDbm) : -999.0;
 
     int servingCqi = 1;
-    if (serving.sinrDb >= 22.7) servingCqi = 15;
-    else if (serving.sinrDb >= 20.7) servingCqi = 14;
-    else if (serving.sinrDb >= 18.7) servingCqi = 13;
-    else if (serving.sinrDb >= 17.4) servingCqi = 12;
-    else if (serving.sinrDb >= 14.1) servingCqi = 11;
-    else if (serving.sinrDb >= 11.7) servingCqi = 10;
-    else if (serving.sinrDb >= 9.0) servingCqi = 9;
-    else if (serving.sinrDb >= 7.0) servingCqi = 8;
-    else if (serving.sinrDb >= 5.1) servingCqi = 7;
-    else if (serving.sinrDb >= 3.0) servingCqi = 6;
-    else if (serving.sinrDb >= 1.0) servingCqi = 5;
-    else if (serving.sinrDb >= -1.0) servingCqi = 4;
-    else if (serving.sinrDb >= -4.7) servingCqi = 3;
-    else if (serving.sinrDb >= -6.7) servingCqi = 2;
+    if (serving.sinrDb >= 22.7)
+      servingCqi = 15;
+    else if (serving.sinrDb >= 20.7)
+      servingCqi = 14;
+    else if (serving.sinrDb >= 18.7)
+      servingCqi = 13;
+    else if (serving.sinrDb >= 17.4)
+      servingCqi = 12;
+    else if (serving.sinrDb >= 14.1)
+      servingCqi = 11;
+    else if (serving.sinrDb >= 11.7)
+      servingCqi = 10;
+    else if (serving.sinrDb >= 9.0)
+      servingCqi = 9;
+    else if (serving.sinrDb >= 7.0)
+      servingCqi = 8;
+    else if (serving.sinrDb >= 5.1)
+      servingCqi = 7;
+    else if (serving.sinrDb >= 3.0)
+      servingCqi = 6;
+    else if (serving.sinrDb >= 1.0)
+      servingCqi = 5;
+    else if (serving.sinrDb >= -1.0)
+      servingCqi = 4;
+    else if (serving.sinrDb >= -4.7)
+      servingCqi = 3;
+    else if (serving.sinrDb >= -6.7)
+      servingCqi = 2;
 
-    m_tickCsv << std::fixed << std::setprecision(3)
-              << now << "," << m_scenario.id << "," << m_pattern.code << "," << ue.id << ","
-              << tp.position.x << "," << tp.position.y << "," << tp.speedMps << ","
-              << ue.servingCell << "," << serving.rsrpDbm << "," << serving.sinrDb << ","
-              << serving.distanceM << "," << servingCqi << "," << bestNeighborCell << ","
-              << bestNeighborRsrp << "," << margin << "," << ue.candidateCell << ","
-              << ue.a3HoldMs << "," << static_cast<int>(decision.hoEvent) << ","
-              << static_cast<int>(decision.rlfEvent) << ","
-              << static_cast<int>(decision.pingPongEvent) << "," << serving.losProbability;
+    m_tickCsv << std::fixed << std::setprecision(3) << now << "," << m_scenario.id << "," << m_pattern.code << ","
+              << ue.id << "," << tp.position.x << "," << tp.position.y << "," << tp.speedMps << "," << ue.servingCell
+              << "," << serving.rsrpDbm << "," << serving.sinrDb << "," << serving.distanceM << "," << servingCqi << ","
+              << bestNeighborCell << "," << bestNeighborRsrp << "," << margin << "," << ue.candidateCell << ","
+              << ue.a3HoldMs << "," << static_cast<int>(decision.hoEvent) << "," << static_cast<int>(decision.rlfEvent)
+              << "," << static_cast<int>(decision.pingPongEvent) << "," << serving.losProbability;
 
     uint32_t written = 0;
     for (size_t idx = 0; idx < meas.size() && written < kTopNeighborsToLog; ++idx)
@@ -1725,7 +1783,7 @@ private:
       Ptr<ConstantPositionMobilityModel> mob = ue.node->GetObject<ConstantPositionMobilityModel>();
       mob->SetPosition(tp.position);
 
-      std::vector<CellMeasurement> meas = MeasureCells(tp);
+      std::vector<CellMeasurement> meas = MeasureCells(ue, tp);
       if (!meas.empty())
         ue.servingCell = meas.front().cellId;
       else
@@ -1778,7 +1836,7 @@ private:
       Ptr<ConstantPositionMobilityModel> mob = ue.node->GetObject<ConstantPositionMobilityModel>();
       mob->SetPosition(tp.position);
 
-      std::vector<CellMeasurement> meas = MeasureCells(tp);
+      std::vector<CellMeasurement> meas = MeasureCells(ue, tp);
       if (meas.empty())
         continue;
 
